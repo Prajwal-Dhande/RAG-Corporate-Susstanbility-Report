@@ -7,13 +7,13 @@ const nextConfig: NextConfig = {
       {
         protocol: 'http',
         hostname: 'localhost',
-        port: '8000',
+        port: '8001',
       },
     ],
   },
   // Environment variables
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001',
   },
 };
 
