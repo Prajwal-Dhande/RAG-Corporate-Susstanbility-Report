@@ -7,9 +7,9 @@ import {
   PieChart, Pie, Cell, LineChart, Line, RadialBarChart, RadialBar, Legend,
 } from 'recharts';
 import {
-  Activity, Zap, Droplets, Trash2, Target, TrendingUp, Leaf, AlertTriangle
+  Activity, Zap, Droplets, Trash2, Target, TrendingUp, Leaf, AlertTriangle, Download, Award
 } from 'lucide-react';
-import { getReport, getKPIs, getTargets, analyzeEmissions, Report } from '@/lib/api';
+import { getReport, getKPIs, getTargets, analyzeEmissions, getESGScore, getExportCSVUrl, Report } from '@/lib/api';
 
 function DashboardContent() {
   const searchParams = useSearchParams();
@@ -19,22 +19,25 @@ function DashboardContent() {
   const [kpis, setKPIs] = useState<{ kpis: { id: string; name: string; description: string; confidence: number; page_numbers: number[]; values: unknown[] }[]; count: number }>({ kpis: [], count: 0 });
   const [targets, setTargets] = useState<{ targets: unknown[]; count: number }>({ targets: [], count: 0 });
   const [emissions, setEmissions] = useState<{ result?: { conclusion?: { emissions?: Record<string, { value: number }> } } }>({});
+  const [esgScore, setEsgScore] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!reportId) { setLoading(false); return; }
     (async () => {
       try {
-        const [r, k, t, e] = await Promise.all([
+        const [r, k, t, e, esg] = await Promise.all([
           getReport(reportId),
           getKPIs(reportId),
           getTargets(reportId),
           analyzeEmissions(reportId).catch(() => ({})),
+          getESGScore(reportId).catch(() => null),
         ]);
         setReport(r);
         setKPIs(k);
         setTargets(t);
         setEmissions(e);
+        setEsgScore(esg);
       } catch { /* empty */ }
       finally { setLoading(false); }
     })();
@@ -100,13 +103,46 @@ function DashboardContent() {
 
   return (
     <div className="animate-in">
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>
-          Sustainability Dashboard
-        </h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-          {report.company_name} — {report.title} {report.fiscal_year ? `(FY${report.fiscal_year})` : ''}
-        </p>
+      <div style={{ marginBottom: 28, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>
+            Sustainability Dashboard
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
+            {report.company_name} — {report.title} {report.fiscal_year ? `(FY${report.fiscal_year})` : ''}
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {esgScore && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 16px', borderRadius: '10px',
+              background: esgScore.grade?.startsWith('A') ? '#10b98115' : esgScore.grade?.startsWith('B') ? '#3b82f615' : '#f59e0b15',
+              border: `1px solid ${esgScore.grade?.startsWith('A') ? '#10b98130' : esgScore.grade?.startsWith('B') ? '#3b82f630' : '#f59e0b30'}`,
+            }}>
+              <Award size={18} style={{ color: esgScore.grade?.startsWith('A') ? '#10b981' : esgScore.grade?.startsWith('B') ? '#3b82f6' : '#f59e0b' }} />
+              <span style={{ fontSize: 20, fontWeight: 800, color: esgScore.grade?.startsWith('A') ? '#10b981' : esgScore.grade?.startsWith('B') ? '#3b82f6' : '#f59e0b' }}>
+                {esgScore.grade}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{esgScore.overall_score}/100</span>
+            </div>
+          )}
+          <a
+            href={getExportCSVUrl(reportId!)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '8px 16px', borderRadius: '8px',
+              backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)',
+              fontWeight: 500, fontSize: 13, textDecoration: 'none',
+              border: '1px solid var(--border-color)',
+            }}
+          >
+            <Download size={14} />
+            Export CSV
+          </a>
+        </div>
       </div>
 
       {/* Stats Grid */}

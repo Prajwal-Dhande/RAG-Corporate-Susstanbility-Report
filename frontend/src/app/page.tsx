@@ -242,15 +242,22 @@ export default function ReportsPage() {
                   </td>
                   <td>{statusBadge(report.status)}</td>
                   <td>
-                    {report.status !== 'completed' && report.processing_progress !== null && (
-                      <div style={{ width: 80 }}>
-                        <div className="progress-bar">
-                          <div className="progress-fill" style={{ width: `${(report.processing_progress || 0) * 100}%` }} />
+                    {!['completed', 'failed'].includes(report.status) && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ width: 100 }}>
+                          <div className="progress-bar">
+                            <div className="progress-fill" style={{ width: `${(report.processing_progress || 0) * 100}%` }} />
+                          </div>
                         </div>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                          {report.processing_message || 'Processing...'}
+                        </span>
                       </div>
                     )}
                     {report.status === 'completed' && (
-                      <ChevronRight size={16} style={{ color: 'var(--text-muted)' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <ChevronRight size={16} style={{ color: 'var(--text-muted)' }} />
+                      </div>
                     )}
                   </td>
                 </tr>

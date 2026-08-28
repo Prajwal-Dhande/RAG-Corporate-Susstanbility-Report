@@ -213,3 +213,23 @@ export function getStorageUrl(path: string): string {
   if (path.startsWith('http')) return path;
   return `${API_BASE}/storage/${path}`;
 }
+
+export async function getESGScore(reportId: string) {
+  const { data } = await api.get(`/api/reports/${reportId}/analysis/esg-score`);
+  return data;
+}
+
+export async function getRegulatoryMapping(reportId: string) {
+  const { data } = await api.get(`/api/reports/${reportId}/analysis/regulatory`);
+  return data;
+}
+
+export async function getExecutiveSummary(reportId: string) {
+  const { data } = await api.get(`/api/reports/${reportId}/analysis/summary`);
+  return data;
+}
+
+export function getExportCSVUrl(reportId: string): string {
+  return `${API_BASE}/api/reports/${reportId}/export/csv`;
+}
+

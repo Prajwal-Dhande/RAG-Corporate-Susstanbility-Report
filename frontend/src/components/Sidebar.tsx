@@ -12,13 +12,19 @@ import {
   BarChart2,
   TrendingUp,
   ShieldCheck,
+  Award,
+  Scale,
+  FileBarChart,
 } from 'lucide-react';
 
 const navLinks = [
   { href: '/', label: 'Reports', icon: FileText },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/esg-scorecard', label: 'ESG Score Card', icon: Award },
+  { href: '/summary', label: 'Executive Summary', icon: FileBarChart },
   { href: '/benchmarking', label: 'Benchmarking', icon: BarChart2 },
-  { href: '/longitudinal', label: 'Longitudinal Analysis', icon: TrendingUp },
+  { href: '/longitudinal', label: 'Longitudinal', icon: TrendingUp },
+  { href: '/regulatory', label: 'Regulatory Compliance', icon: Scale },
   { href: '/targets', label: 'Target Analysis', icon: Target },
   { href: '/audit', label: 'Consistency Audit', icon: ShieldCheck },
   { href: '/graph', label: 'Knowledge Graph', icon: GitBranch },
