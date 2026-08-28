@@ -6,11 +6,19 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
+from backend.app.database import get_db
+from backend.app.models import Report, Company
 from mmkg.graph_builder import get_graph_backend
 from reasoning.engine import ReasoningEngine
+from reasoning.consistency import ConsistencyChecker
+from analytics.benchmarking import BenchmarkAnalyzer
+from analytics.longitudinal import LongitudinalAnalyzer
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -52,41 +60,84 @@ async def analyze_emissions(report_id: str):
     }
 
 
-@router.post("/{report_id}/analysis/consistency")
+@router.get("/{report_id}/analysis/consistency")
 async def analyze_consistency(report_id: str):
     """Check cross-modal consistency of reported data."""
-    # TODO: Implement consistency checking
+    graph = get_graph_backend()
+    checker = ConsistencyChecker(graph)
+
+    start = time.time()
+    results = await checker.check_report_consistency(report_id)
+    duration = time.time() - start
+
     return {
         "report_id": report_id,
         "analysis_type": "consistency",
-        "status": "not_implemented",
-        "message": "Cross-modal consistency checking is under development",
+        "duration_seconds": duration,
+        "results": [r.to_dict() for r in results],
     }
 
 
-@router.post("/{report_id}/analysis/energy")
-async def analyze_energy(report_id: str):
-    """Analyze energy consumption data."""
+@router.post("/analysis/benchmark")
+async def analyze_benchmark(report_ids: List[str] = Body(...), db: AsyncSession = Depends(get_db)):
+    """Cross-company benchmarking for specific reports."""
     graph = get_graph_backend()
-    all_entities = await graph.get_all_entities(report_id)
+    analyzer = BenchmarkAnalyzer(graph)
 
-    energy_entities = [
-        e for e in all_entities
-        if any(kw in e.name.lower() for kw in ["energy", "electricity", "power", "renewable", "solar", "wind", "mwh", "gwh"])
-    ]
+    # Resolve company names for the reports
+    report_info = {}
+    for rid in report_ids:
+        r = await db.execute(select(Report).where(Report.id == rid))
+        report = r.scalar_one_or_none()
+        if report:
+            c = await db.execute(select(Company).where(Company.id == report.company_id))
+            company = c.scalar_one_or_none()
+            report_info[rid] = company.name if company else f"Report {rid[:8]}"
+
+    # Fetch benchmark data (assuming target_year=2024 for simplicity, or we can make it dynamic)
+    start = time.time()
+    results = await analyzer.compare_emissions(report_ids, target_year=2024)
+    duration = time.time() - start
+
+    # Map report_ids to company names in results
+    for res in results:
+        mapped_companies = {}
+        for rid, data in res.companies.items():
+            comp_name = report_info.get(rid, rid)
+            mapped_companies[comp_name] = data
+        res.companies = mapped_companies
 
     return {
-        "report_id": report_id,
-        "analysis_type": "energy",
-        "entities": [
-            {
-                "id": e.id,
-                "name": e.name,
-                "description": e.description,
-                "confidence": e.confidence,
-                "page_numbers": e.page_numbers,
-            }
-            for e in energy_entities
-        ],
-        "count": len(energy_entities),
+        "analysis_type": "benchmark",
+        "duration_seconds": duration,
+        "results": [r.to_dict() for r in results],
+    }
+
+
+@router.post("/analysis/longitudinal")
+async def analyze_longitudinal(company_id: str = Body(embed=True), db: AsyncSession = Depends(get_db)):
+    """Multi-year longitudinal analysis for a specific company."""
+    graph = get_graph_backend()
+    analyzer = LongitudinalAnalyzer(graph)
+
+    c = await db.execute(select(Company).where(Company.id == company_id))
+    company = c.scalar_one_or_none()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    r = await db.execute(select(Report).where(Report.company_id == company_id))
+    reports = r.scalars().all()
+    
+    report_dicts = [{"id": rep.id, "fiscal_year": rep.fiscal_year} for rep in reports]
+
+    start = time.time()
+    results = await analyzer.analyze_company_trends(company.name, report_dicts)
+    duration = time.time() - start
+
+    return {
+        "company_id": company.id,
+        "company_name": company.name,
+        "analysis_type": "longitudinal",
+        "duration_seconds": duration,
+        "results": [r.to_dict() for r in results],
     }

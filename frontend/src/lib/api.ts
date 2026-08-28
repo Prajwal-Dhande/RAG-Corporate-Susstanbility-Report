@@ -184,7 +184,17 @@ export async function analyzeEnergy(reportId: string) {
 }
 
 export async function analyzeConsistency(reportId: string) {
-  const { data } = await api.post(`/api/reports/${reportId}/analysis/consistency`);
+  const { data } = await api.get(`/api/reports/${reportId}/analysis/consistency`);
+  return data;
+}
+
+export async function getBenchmarkData(reportIds: string[]) {
+  const { data } = await api.post(`/api/reports/analysis/benchmark`, reportIds);
+  return data;
+}
+
+export async function getLongitudinalData(companyId: string) {
+  const { data } = await api.post(`/api/reports/analysis/longitudinal`, { company_id: companyId });
   return data;
 }
 

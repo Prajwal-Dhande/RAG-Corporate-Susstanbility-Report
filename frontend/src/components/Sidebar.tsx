@@ -9,12 +9,18 @@ import {
   GitBranch,
   Search,
   Activity,
+  BarChart2,
+  TrendingUp,
+  ShieldCheck,
 } from 'lucide-react';
 
 const navLinks = [
   { href: '/', label: 'Reports', icon: FileText },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/benchmarking', label: 'Benchmarking', icon: BarChart2 },
+  { href: '/longitudinal', label: 'Longitudinal Analysis', icon: TrendingUp },
   { href: '/targets', label: 'Target Analysis', icon: Target },
+  { href: '/audit', label: 'Consistency Audit', icon: ShieldCheck },
   { href: '/graph', label: 'Knowledge Graph', icon: GitBranch },
   { href: '/evidence', label: 'Evidence Explorer', icon: Search },
 ];
