@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     graph_backend: Literal["networkx", "neo4j"] = "networkx"
 
     # --- Model Configuration ---
-    vlm_provider: Literal["openai", "local", "mock"] = "openai"
+    vlm_provider: Literal["openai", "local", "mock", "groq"] = "openai"
     vlm_model: str = "gpt-4o-mini"
     vlm_temperature: float = 0.0
     vlm_max_tokens: int = 4096

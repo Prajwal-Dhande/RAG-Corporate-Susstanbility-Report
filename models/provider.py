@@ -221,6 +221,74 @@ class MockProvider(ModelProvider):
         return "mock/test"
 
 
+class GroqProvider(ModelProvider):
+    """Groq API provider for fast free inference."""
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        settings = get_settings()
+        self.api_key = api_key or settings.openai_api_key
+        self.model = model or "llama-3.1-8b-instant"
+
+        if not self.api_key:
+            raise ValueError("API Key is required for Groq provider")
+
+        from openai import AsyncOpenAI
+        # Groq is OpenAI compatible
+        self.client = AsyncOpenAI(api_key=self.api_key, base_url="https://api.groq.com/openai/v1")
+
+    async def generate(
+        self,
+        prompt: str,
+        images: Optional[list[bytes]] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+    ) -> ModelResponse:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        
+        # Groq does not support multimodal in all models, so we ignore images for text models
+        content = [{"type": "text", "text": prompt}]
+        messages.append({"role": "user", "content": content})
+
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        start_time = time.time()
+        response = await self.client.chat.completions.create(**kwargs)
+        duration = time.time() - start_time
+
+        raw_content = response.choices[0].message.content or ""
+        parsed = None
+        if json_mode:
+            try:
+                parsed = json.loads(raw_content)
+            except json.JSONDecodeError:
+                pass
+
+        return ModelResponse(
+            content=raw_content,
+            parsed=parsed,
+            model=self.model,
+            tokens_input=response.usage.prompt_tokens if response.usage else 0,
+            tokens_output=response.usage.completion_tokens if response.usage else 0,
+            duration_seconds=duration,
+            raw_response=response.model_dump(),
+        )
+
+    def get_name(self) -> str:
+        return f"groq/{self.model}"
+
+
 def get_model_provider(provider_type: Optional[str] = None) -> ModelProvider:
     """Factory: return the configured model provider."""
     settings = get_settings()
@@ -228,7 +296,10 @@ def get_model_provider(provider_type: Optional[str] = None) -> ModelProvider:
 
     if provider == "openai":
         return OpenAIProvider()
+    elif provider == "groq":
+        return GroqProvider()
     elif provider == "mock":
         return MockProvider()
     else:
         raise ValueError(f"Unknown model provider: {provider}")
+

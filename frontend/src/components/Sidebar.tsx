@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard,
   FileText,
@@ -9,30 +9,19 @@ import {
   GitBranch,
   Search,
   Activity,
-  BarChart2,
-  TrendingUp,
-  ShieldCheck,
-  Award,
-  Scale,
-  FileBarChart,
 } from 'lucide-react';
 
 const navLinks = [
   { href: '/', label: 'Reports', icon: FileText },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/esg-scorecard', label: 'ESG Score Card', icon: Award },
-  { href: '/summary', label: 'Executive Summary', icon: FileBarChart },
-  { href: '/benchmarking', label: 'Benchmarking', icon: BarChart2 },
-  { href: '/longitudinal', label: 'Longitudinal', icon: TrendingUp },
-  { href: '/regulatory', label: 'Regulatory Compliance', icon: Scale },
-  { href: '/targets', label: 'Target Analysis', icon: Target },
-  { href: '/audit', label: 'Consistency Audit', icon: ShieldCheck },
   { href: '/graph', label: 'Knowledge Graph', icon: GitBranch },
   { href: '/evidence', label: 'Evidence Explorer', icon: Search },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const reportId = searchParams.get('id');
 
   return (
     <aside className="sidebar">
@@ -40,7 +29,7 @@ export default function Sidebar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Activity size={24} style={{ color: 'var(--accent-emerald)' }} />
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>
+            <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
               SustainGraph
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
@@ -54,10 +43,14 @@ export default function Sidebar() {
         {navLinks.map(({ href, label, icon: Icon }) => {
           const isActive = pathname === href ||
             (href !== '/' && pathname.startsWith(href));
+          
+          // Preserve the report ID in the URL if it exists (except for the Home/Reports page)
+          const linkHref = (reportId && href !== '/') ? `${href}?id=${reportId}` : href;
+
           return (
             <Link
               key={href}
-              href={href}
+              href={linkHref}
               className={`sidebar-link ${isActive ? 'active' : ''}`}
             >
               <Icon size={18} />

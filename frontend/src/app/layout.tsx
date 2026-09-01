@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import AuthWrapper from "@/components/AuthWrapper";
 
 export const metadata: Metadata = {
   title: "SustainGraph — MMKG-RAG Sustainability Analytics",
@@ -23,8 +24,10 @@ export default function RootLayout({
         />
       </head>
       <body suppressHydrationWarning>
-        <Sidebar />
-        <main className="main-content">{children}</main>
+        <AuthWrapper>
+          <Sidebar />
+          <main className="main-content animate-fade-in">{children}</main>
+        </AuthWrapper>
       </body>
     </html>
   );

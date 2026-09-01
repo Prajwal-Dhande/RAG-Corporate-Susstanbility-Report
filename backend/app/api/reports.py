@@ -11,7 +11,7 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Depends
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Depends, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,7 @@ _processing_tasks: dict[str, dict] = {}
 
 @router.post("/upload", response_model=ReportUploadResponse)
 async def upload_report(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     company_name: str = Form(...),
     fiscal_year: Optional[int] = Form(None),
@@ -59,7 +60,7 @@ async def upload_report(
     if not company:
         company = Company(name=company_name)
         db.add(company)
-        await db.flush()
+        await db.commit()
 
     # Create report record
     report_id = str(uuid.uuid4())
@@ -75,7 +76,7 @@ async def upload_report(
         status=ProcessingStatus.PENDING,
     )
     db.add(report)
-    await db.flush()
+    await db.commit()
 
     # Store PDF and start processing in background
     async def process_in_background():
@@ -92,10 +93,10 @@ async def upload_report(
             }
             async with async_session() as session:
                 result = await session.execute(select(Report).where(Report.id == report_id))
-                report = result.scalar_one_or_none()
-                if report:
-                    report.processing_progress = progress
-                    report.processing_message = f"{stage}: {message}"
+                report_obj = result.scalar_one_or_none()
+                if report_obj:
+                    report_obj.processing_progress = progress
+                    report_obj.processing_message = f"{stage}: {message}"
                     # Map stage to status
                     stage_status_map = {
                         "ingestion": ProcessingStatus.UPLOADING,
@@ -107,7 +108,7 @@ async def upload_report(
                         "complete": ProcessingStatus.COMPLETED,
                         "error": ProcessingStatus.FAILED,
                     }
-                    report.status = stage_status_map.get(stage, report.status)
+                    report_obj.status = stage_status_map.get(stage, report_obj.status)
                     await session.commit()
 
         try:
@@ -145,7 +146,7 @@ async def upload_report(
                     await session.commit()
 
     # Launch background task
-    asyncio.create_task(process_in_background())
+    background_tasks.add_task(process_in_background)
 
     return ReportUploadResponse(
         id=report_id,
@@ -253,3 +254,16 @@ async def get_report_status(report_id: str, db: AsyncSession = Depends(get_db)):
         message=report.processing_message or task_info.get("message"),
         stages=[],
     )
+
+
+@router.delete("/{report_id}")
+async def delete_report(report_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete a report."""
+    result = await db.execute(select(Report).where(Report.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(404, "Report not found")
+        
+    await db.delete(report)
+    await db.commit()
+    return {"message": "Report deleted successfully"}

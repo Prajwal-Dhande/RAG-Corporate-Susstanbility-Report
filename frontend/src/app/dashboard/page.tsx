@@ -146,61 +146,79 @@ function DashboardContent() {
       </div>
 
       {/* Stats Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16, marginBottom: 28 }}>
-        {statCards.map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="stat-card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span className="stat-label">{label}</span>
-              <Icon size={18} style={{ color }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20, marginBottom: 28 }}>
+        {statCards.map((s, i) => (
+          <div key={s.label} className={`stat-card animate-slide-up stagger-${i + 1} opacity-0`}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="stat-label">{s.label}</span>
+              <s.icon size={20} style={{ color: s.color }} />
             </div>
-            <span className="stat-value" style={{ color }}>{value}</span>
+            <div className="stat-value">{s.value.toLocaleString()}</div>
           </div>
         ))}
       </div>
-
-      {/* Charts Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 28 }}>
-        {/* KPI Category Breakdown */}
-        <div className="card" style={{ padding: 24 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 20 }}>KPI Category Breakdown</h3>
-          {categoryData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 24, marginBottom: 24 }}>
+        {/* Categories Chart */}
+        <div className="card animate-slide-up stagger-4 opacity-0" style={{ padding: 24 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>KPI Category Breakdown</h3>
+          <div style={{ height: 300 }}>
+            <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={categoryData} cx="50%" cy="50%" innerRadius={60} outerRadius={100}
-                  dataKey="value" nameKey="name" paddingAngle={3} stroke="none">
-                  {categoryData.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                <Pie
+                  data={categoryData}
+                  cx="50%" cy="50%"
+                  innerRadius={70} outerRadius={100}
+                  paddingAngle={5}
+                  dataKey="value"
+                  isAnimationActive={true}
+                  animationBegin={200}
+                  animationDuration={1200}
+                  animationEasing="ease-out"
+                >
+                  {categoryData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} style={{ filter: 'drop-shadow(0px 4px 6px rgba(0,0,0,0.1))' }} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8 }}
-                  itemStyle={{ color: 'var(--text-primary)' }}
+                <Tooltip 
+                  contentStyle={{ background: 'var(--bg-card)', border: 'none', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
+                  itemStyle={{ color: 'var(--text-primary)', fontWeight: 600 }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12, color: 'var(--text-secondary)' }} />
+                <Legend iconType="circle" wrapperStyle={{ paddingTop: 20, fontSize: 13, fontWeight: 500 }} />
               </PieChart>
             </ResponsiveContainer>
-          ) : (
-            <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-              No KPI data available
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* Confidence Distribution */}
-        <div className="card" style={{ padding: 24 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 20 }}>Extraction Confidence Distribution</h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={confData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
-              <XAxis dataKey="range" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} />
-              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} />
-              <Tooltip
-                contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8 }}
-                itemStyle={{ color: 'var(--text-primary)' }}
-              />
-              <Bar dataKey="count" fill="var(--accent-blue)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+        {/* Confidence Chart */}
+        <div className="card animate-slide-up stagger-5 opacity-0" style={{ padding: 24 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>Extraction Confidence Distribution</h3>
+          <div style={{ height: 300 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={confData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--accent-blue)" stopOpacity={0.9}/>
+                    <stop offset="95%" stopColor="var(--accent-blue)" stopOpacity={0.6}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <XAxis dataKey="range" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+                <Tooltip 
+                  cursor={{ fill: 'var(--bg-secondary)' }}
+                  contentStyle={{ background: 'var(--bg-card)', border: 'none', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
+                />
+                <Bar 
+                  dataKey="count" 
+                  fill="url(#colorCount)" 
+                  radius={[6, 6, 0, 0]} 
+                  isAnimationActive={true}
+                  animationBegin={400}
+                  animationDuration={1500}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 

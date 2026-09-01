@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Upload, FileText, Clock, CheckCircle, XCircle, Loader2,
-  ChevronRight, Building2, Calendar, Layers, GitBranch, Target
+  ChevronRight, Building2, Calendar, Layers, GitBranch, Target, Trash2
 } from 'lucide-react';
-import { uploadReport, getReports, getReportStatus, Report } from '@/lib/api';
+import { uploadReport, getReports, getReportStatus, deleteReport, Report } from '@/lib/api';
 
 export default function ReportsPage() {
   const [reports, setReports] = useState<Report[]>([]);
@@ -56,6 +56,17 @@ export default function ReportsPage() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Upload failed');
     } finally { setUploading(false); }
+  };
+
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this report?')) return;
+    try {
+      await deleteReport(id);
+      await fetchReports();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Delete failed');
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -241,7 +252,7 @@ export default function ReportsPage() {
                     </div>
                   </td>
                   <td>{statusBadge(report.status)}</td>
-                  <td>
+                  <td style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     {!['completed', 'failed'].includes(report.status) && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ width: 100 }}>
@@ -255,10 +266,18 @@ export default function ReportsPage() {
                       </div>
                     )}
                     {report.status === 'completed' && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div>
                         <ChevronRight size={16} style={{ color: 'var(--text-muted)' }} />
                       </div>
                     )}
+                    <button 
+                      onClick={(e) => handleDelete(e, report.id)}
+                      className="btn-icon" 
+                      style={{ padding: 4, background: 'transparent', border: 'none', cursor: 'pointer' }}
+                      title="Delete Report"
+                    >
+                      <Trash2 size={16} style={{ color: 'var(--status-error)' }} />
+                    </button>
                   </td>
                 </tr>
               ))}

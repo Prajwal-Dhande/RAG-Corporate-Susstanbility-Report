@@ -233,3 +233,7 @@ export function getExportCSVUrl(reportId: string): string {
   return `${API_BASE}/api/reports/${reportId}/export/csv`;
 }
 
+export async function deleteReport(reportId: string) {
+  const { data } = await api.delete(`/api/reports/${reportId}`);
+  return data;
+}

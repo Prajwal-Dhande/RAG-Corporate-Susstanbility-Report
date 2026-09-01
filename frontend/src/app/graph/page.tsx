@@ -117,8 +117,8 @@ function GraphContent() {
       ctx.beginPath();
       ctx.moveTo(src.x, src.y);
       ctx.lineTo(tgt.x, tgt.y);
-      ctx.strokeStyle = 'rgba(59,130,246,0.15)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)'; // Darker slate for light mode
+      ctx.lineWidth = 1.5;
       ctx.stroke();
     });
 
@@ -129,30 +129,50 @@ function GraphContent() {
 
       const color = TYPE_COLORS[entity.type] || '#64748b';
       const isSelected = selectedEntity?.id === entity.id;
-      const radius = isSelected ? 10 : 6;
+      const radius = isSelected ? 12 : 7;
 
-      // Glow
+      // Glow / Shadow effect
+      ctx.shadowColor = color;
+      ctx.shadowBlur = isSelected ? 20 : 5;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 4;
+
       if (isSelected) {
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 18, 0, Math.PI * 2);
-        ctx.fillStyle = color + '30';
+        ctx.arc(pos.x, pos.y, 22, 0, Math.PI * 2);
+        ctx.fillStyle = color + '20';
         ctx.fill();
       }
 
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = color;
+      
+      // 3D Ball Effect using Radial Gradient
+      const gradient = ctx.createRadialGradient(
+        pos.x - radius * 0.3, pos.y - radius * 0.3, radius * 0.1, // Highlight source
+        pos.x, pos.y, radius // Outer edge
+      );
+      gradient.addColorStop(0, '#ffffff'); // Shiny highlight
+      gradient.addColorStop(0.3, color); // Base color
+      gradient.addColorStop(1, '#00000080'); // Dark shadow on the edge
+      
+      ctx.fillStyle = gradient;
       ctx.fill();
-      ctx.strokeStyle = isSelected ? '#fff' : color + '60';
-      ctx.lineWidth = isSelected ? 2 : 1;
+      
+      // Reset shadow for stroke and text
+      ctx.shadowBlur = 0;
+      ctx.shadowColor = 'transparent';
+
+      ctx.strokeStyle = isSelected ? '#0f172a' : '#ffffff';
+      ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
 
       // Label
-      ctx.font = `${isSelected ? '600' : '400'} ${isSelected ? 11 : 9}px Inter, sans-serif`;
-      ctx.fillStyle = isSelected ? '#fff' : '#94a3b8';
+      ctx.font = `${isSelected ? '700' : '500'} ${isSelected ? 12 : 10}px Inter, sans-serif`;
+      ctx.fillStyle = isSelected ? '#0f172a' : '#334155'; // Dark slate for light mode
       ctx.textAlign = 'center';
       const label = entity.name.length > 25 ? entity.name.slice(0, 22) + '...' : entity.name;
-      ctx.fillText(label, pos.x, pos.y + radius + 12);
+      ctx.fillText(label, pos.x, pos.y + radius + 14);
     });
 
     ctx.restore();
