@@ -21,7 +21,7 @@ router = APIRouter()
 async def get_report_graph(
     report_id: str,
     entity_type: Optional[str] = Query(None, description="Filter by entity type"),
-    limit: int = Query(200, le=1000),
+    limit: int = Query(400, le=1500),
 ):
     """Get the knowledge graph for a report."""
     graph = get_graph_backend()
@@ -33,11 +33,39 @@ async def get_report_graph(
 
     relations = await graph.get_all_relations(report_id)
 
+    # Deduplicate entities by name and type; union provenance across mentions
+    canonical_entities = {}
+    id_map = {}
+
+    for e in entities:
+        t = e.type.value if hasattr(e.type, "value") else str(e.type)
+        key = f"{e.name.strip().lower()}|{t}"
+        if key not in canonical_entities:
+            canonical_entities[key] = e
+            id_map[e.id] = e.id
+        else:
+            canon = canonical_entities[key]
+            id_map[e.id] = canon.id
+            # Fix Backend Mock Data Logic: Limit merged pages to 2 to prevent a KPI mapping to the entire document
+            merged_pages = sorted(set(canon.page_numbers or []) | set(e.page_numbers or []))
+            canon.page_numbers = merged_pages[:2]
+            
+            merged_components = dict.fromkeys((canon.source_component_ids or []) + (e.source_component_ids or []))
+            canon.source_component_ids = list(merged_components)[:2]
+            if (e.confidence or 0) > (canon.confidence or 0):
+                canon.confidence = e.confidence
+                if e.description:
+                    canon.description = e.description
+
+    unique_entities = list(canonical_entities.values())
+    returned_entities = unique_entities[:limit]
+    returned_ids = {e.id for e in returned_entities}
+
     entity_responses = [
         GraphEntityResponse(
             id=e.id,
             name=e.name,
-            type=e.type.value if isinstance(e.type, EntityType) else e.type,
+            type=e.type.value if hasattr(e.type, "value") else str(e.type),
             modality=e.modality,
             description=e.description,
             confidence=e.confidence,
@@ -45,28 +73,43 @@ async def get_report_graph(
             source_component_ids=e.source_component_ids,
             properties=e.properties,
         )
-        for e in entities[:limit]
+        for e in returned_entities
     ]
 
-    relation_responses = [
-        GraphRelationResponse(
-            id=r.id,
-            source_id=r.source_id,
-            source_name="",
-            relation=r.relation.value if hasattr(r.relation, 'value') else str(r.relation),
-            target_id=r.target_id,
-            target_name="",
-            confidence=r.confidence,
-            description=r.description,
+    name_map = {e.id: e.name for e in unique_entities}
+
+    unique_relations = []
+    seen_relations = set()
+    for r in relations:
+        new_source = id_map.get(r.source_id, r.source_id)
+        new_target = id_map.get(r.target_id, r.target_id)
+        if new_source == new_target:
+            continue
+        if new_source not in returned_ids or new_target not in returned_ids:
+            continue
+        rel_val = r.relation.value if hasattr(r.relation, "value") else str(r.relation)
+        rel_key = f"{new_source}_{rel_val}_{new_target}"
+        if rel_key in seen_relations:
+            continue
+        seen_relations.add(rel_key)
+        unique_relations.append(
+            GraphRelationResponse(
+                id=r.id,
+                source_id=new_source,
+                source_name=name_map.get(new_source, ""),
+                relation=rel_val,
+                target_id=new_target,
+                target_name=name_map.get(new_target, ""),
+                confidence=r.confidence,
+                description=r.description,
+            )
         )
-        for r in relations[:limit * 2]
-    ]
 
     return GraphResponse(
         entities=entity_responses,
-        relations=relation_responses,
-        entity_count=len(entities),
-        relation_count=len(relations),
+        relations=unique_relations,
+        entity_count=len(unique_entities),
+        relation_count=len(unique_relations),
     )
 
 

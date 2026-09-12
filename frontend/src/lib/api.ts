@@ -5,7 +5,7 @@
 
 import axios, { AxiosInstance } from 'axios';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE,
@@ -148,7 +148,8 @@ export async function getReportStatus(id: string) {
 }
 
 export async function getReportGraph(id: string, entityType?: string): Promise<GraphData> {
-  const params = entityType ? { entity_type: entityType } : {};
+  const params: Record<string, string | number> = { limit: 500 };
+  if (entityType) params.entity_type = entityType;
   const { data } = await api.get(`/api/reports/${id}/graph`, { params });
   return data;
 }

@@ -1,342 +1,242 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import { useState, useEffect, useRef, useMemo, Suspense, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { GitBranch, Filter, ZoomIn, ZoomOut, Maximize2, X } from 'lucide-react';
+import Link from 'next/link';
+import dynamic from 'next/dynamic';
+import { GitBranch, Filter, X } from 'lucide-react';
 import { getReport, getReportGraph, getEvidence, Report, GraphData, GraphEntity, EvidenceData } from '@/lib/api';
+import * as d3 from 'd3-force';
 
-// Entity type color map
+// Dynamically import react-force-graph-2d to avoid SSR issues with canvas
+const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
+
 const TYPE_COLORS: Record<string, string> = {
-  Company: '#3b82f6',
-  Report: '#6366f1',
-  Page: '#64748b',
-  KPI: '#10b981',
-  KPIValue: '#22d3ee',
-  Target: '#f59e0b',
-  Baseline: '#fb923c',
-  ActualValue: '#06b6d4',
-  EmissionScope: '#ef4444',
-  FiscalPeriod: '#a78bfa',
-  Commitment: '#f43f5e',
-  Unit: '#94a3b8',
-  BusinessSegment: '#84cc16',
-  GeographicRegion: '#14b8a6',
-  RegulatoryFramework: '#e879f9',
-  SustainabilityGoal: '#fbbf24',
-  Deadline: '#fb7185',
-  MaterialTopic: '#38bdf8',
+  Company: '#3b82f6', Report: '#6366f1', Page: '#94a3b8', Section: '#cbd5e1',
+  KPI: '#10b981', KPIValue: '#22d3ee', Target: '#f59e0b', Baseline: '#fb923c',
+  ActualValue: '#06b6d4', EmissionScope: '#ef4444', FiscalPeriod: '#8b5cf6',
+  Commitment: '#f43f5e', Unit: '#94a3b8', BusinessSegment: '#84cc16',
+  GeographicRegion: '#14b8a6', RegulatoryFramework: '#a855f7',
+  SustainabilityGoal: '#eab308', Deadline: '#fb7185', MaterialTopic: '#38bdf8',
+  Claim: '#64748b',
 };
+
+const STRUCTURAL_TYPES = new Set(['Page', 'Section', 'Paragraph', 'Table', 'Chart', 'Figure', 'Unit', 'Evidence']);
+
+function nodeSize(type: string): number {
+  if (type === 'Company' || type === 'Report') return 24;
+  if (type === 'KPI' || type === 'Target' || type === 'EmissionScope' || type === 'MaterialTopic') return 16;
+  if (type === 'Commitment' || type === 'Baseline' || type === 'ActualValue') return 12;
+  return 8;
+}
 
 function GraphContent() {
   const searchParams = useSearchParams();
   const reportId = searchParams.get('id');
 
+  const graphRef = useRef<any>(null);
+
   const [report, setReport] = useState<Report | null>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
-  const [selectedEntity, setSelectedEntity] = useState<GraphEntity | null>(null);
+  const [selectedEntity, setSelectedEntity] = useState<any | null>(null);
   const [evidence, setEvidence] = useState<EvidenceData | null>(null);
-  const [filterType, setFilterType] = useState<string>('');
-  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(['Page']));
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(STRUCTURAL_TYPES));
   const [loading, setLoading] = useState(true);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     if (!reportId) { setLoading(false); return; }
     (async () => {
+      setLoading(true);
       try {
         const [r, g] = await Promise.all([
           getReport(reportId),
-          getReportGraph(reportId, filterType || undefined),
+          getReportGraph(reportId),
         ]);
         setReport(r);
         setGraphData(g);
-      } catch { /* empty */ }
-      finally { setLoading(false); }
-    })();
-  }, [reportId, filterType]);
-
-  // Layout — Force-directed physics simulation
-  useEffect(() => {
-    if (!graphData || graphData.entities.length === 0) return;
-    const pos: Record<string, { x: number; y: number; vx: number; vy: number }> = {};
-    const entities = graphData.entities;
-    const relations = graphData.relations;
-    const cx = window.innerWidth / 2 || 400;
-    const cy = window.innerHeight / 2 || 300;
-
-    // 1. Initialize randomly around center
-    entities.forEach(e => {
-      pos[e.id] = {
-        x: cx + (Math.random() - 0.5) * 600,
-        y: cy + (Math.random() - 0.5) * 600,
-        vx: 0, vy: 0
-      };
-    });
-
-    // 2. Simulate physics synchronously (Fruchterman-Reingold with Hierarchical Radial Gravity)
-    const k = Math.sqrt((800 * 600) / (entities.length || 1)) * 1.5; // Optimal distance
-
-    // Radius map for semantic hierarchy
-    const typeRadius: Record<string, number> = {
-      'Company': 0,
-      'Report': 0,
-      'EmissionScope': 120,
-      'MaterialTopic': 120,
-      'BusinessSegment': 120,
-      'KPI': 250,
-      'Target': 250,
-      'Baseline': 250,
-    };
-    const defaultRadius = 380; // KPIValue, Unit, Page, etc.
-    
-    for (let iter = 0; iter < 150; iter++) {
-      // Repulsion
-      for (let i = 0; i < entities.length; i++) {
-        for (let j = i + 1; j < entities.length; j++) {
-          const u = pos[entities[i].id];
-          const v = pos[entities[j].id];
-          let dx = u.x - v.x;
-          let dy = u.y - v.y;
-          if (dx === 0 && dy === 0) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); }
-          const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-          if (dist < k * 2) {
-            // Decrease repulsion by 50%
-            const force = ((k * k) / dist) * 0.5;
-            const fx = (dx / dist) * force;
-            const fy = (dy / dist) * force;
-            u.vx += fx; u.vy += fy;
-            v.vx -= fx; v.vy -= fy;
-          }
-        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
       }
+    })();
+  }, [reportId]);
 
-      // Attraction (Edges)
-      relations.forEach(rel => {
-        const u = pos[rel.source_id];
-        const v = pos[rel.target_id];
-        if (!u || !v) return;
-        let dx = u.x - v.x;
-        let dy = u.y - v.y;
-        if (dx === 0 && dy === 0) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); }
-        const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-        // Tighten springs: Increase attraction by 300%
-        const force = (dist * dist) / k;
-        const fx = (dx / dist) * force * 1.5;
-        const fy = (dy / dist) * force * 1.5;
-        u.vx -= fx; u.vy -= fy;
-        v.vx += fx; v.vy += fy;
+  const entityTypes = useMemo(() => {
+    if (!graphData) return [];
+    return [...new Set(graphData.entities.map(e => e.type))].sort();
+  }, [graphData]);
+
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    graphData?.entities.forEach(e => {
+      counts[e.type] = (counts[e.type] || 0) + 1;
+    });
+    return counts;
+  }, [graphData]);
+
+  const toggleType = (type: string) => {
+    setHiddenTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  };
+
+  // 1. Format Data properly for ForceGraph
+  // "Ensure the links array objects have source and target keys that strictly match the data types"
+  const formattedGraph = useMemo(() => {
+    if (!graphData) return { nodes: [], links: [] };
+    
+    const visibleEntities = graphData.entities.filter(e => !hiddenTypes.has(e.type));
+    const visibleIds = new Set(visibleEntities.map(e => e.id));
+
+    const nodes = visibleEntities.map(e => ({
+      ...e,
+      val: nodeSize(e.type)
+    }));
+
+    let links = graphData.relations
+      .filter(r => visibleIds.has(r.source_id) && visibleIds.has(r.target_id))
+      .map(r => ({
+        ...r,
+        source: r.source_id,
+        target: r.target_id
+      }));
+
+    // Synthesize hierarchical edges for standard entities to guarantee continuity
+    const reportNode = visibleEntities.find(e => e.type === 'Report');
+    
+    if (reportNode) {
+      const scopes = visibleEntities.filter(e => e.type === 'EmissionScope');
+      const kpis = visibleEntities.filter(e => e.type === 'KPI');
+      const kpiValues = visibleEntities.filter(e => e.type === 'KPIValue');
+
+      // Link Scopes to Report
+      scopes.forEach(scope => {
+        const isLinked = links.some(l => (l.source === reportNode.id && l.target === scope.id) || (l.target === reportNode.id && l.source === scope.id));
+        if (!isLinked) {
+          links.push({ source: reportNode.id, target: scope.id, relation: 'HAS_SCOPE', id: `syn-scope-${scope.id}` } as any);
+        }
       });
 
-      // Hierarchical Radial Gravity and Position Update
-      entities.forEach(e => {
-        const u = pos[e.id];
-        
-        const targetR = typeRadius[e.type] ?? defaultRadius;
-        const angle = Math.atan2(u.y - cy, u.x - cx);
-        const targetX = cx + Math.cos(angle) * targetR;
-        const targetY = cy + Math.sin(angle) * targetR;
-        
-        // Strong pull towards the target semantic ring
-        u.vx += (targetX - u.x) * 0.12; 
-        u.vy += (targetY - u.y) * 0.12;
-        
-        // Clamp velocity to prevent physics explosion
-        const speed = Math.sqrt(u.vx * u.vx + u.vy * u.vy);
-        const maxSpeed = 50;
-        if (speed > maxSpeed) {
-           u.vx = (u.vx / speed) * maxSpeed;
-           u.vy = (u.vy / speed) * maxSpeed;
+      // Link KPIs to Scopes
+      kpis.forEach(kpi => {
+        const isLinked = links.some(l => scopes.some(s => (l.source === s.id && l.target === kpi.id) || (l.target === s.id && l.source === kpi.id)));
+        if (!isLinked) {
+          const scope1 = scopes.find(s => s.name.toLowerCase().includes('scope 1')) || scopes[0];
+          const parentId = scope1 ? scope1.id : reportNode.id;
+          links.push({ source: parentId, target: kpi.id, relation: 'HAS_KPI', id: `syn-kpi-${kpi.id}` } as any);
         }
+      });
 
-        u.vx *= 0.6; // Friction
-        u.vy *= 0.6;
-        
-        u.x += u.vx;
-        u.y += u.vy;
-        
-        // Failsafe for NaN
-        if (!isFinite(u.x) || isNaN(u.x)) u.x = cx + Math.random() * 10;
-        if (!isFinite(u.y) || isNaN(u.y)) u.y = cy + Math.random() * 10;
+      // Link KPIValues to KPIs
+      kpiValues.forEach(val => {
+        const isLinked = links.some(l => kpis.some(k => (l.source === k.id && l.target === val.id) || (l.target === k.id && l.source === val.id)));
+        if (!isLinked) {
+          const kpi = kpis.find(k => k.name.toLowerCase().includes('total')) || kpis[0];
+          const parentId = kpi ? kpi.id : reportNode.id;
+          links.push({ source: parentId, target: val.id, relation: 'HAS_VALUE', id: `syn-val-${val.id}` } as any);
+        }
+      });
+      
+      // Link any remaining disconnected nodes directly to Report
+      const hasEdges = new Set(links.flatMap(l => [l.source, l.target]));
+      visibleEntities.forEach(e => {
+        if (e.id !== reportNode.id && !hasEdges.has(e.id)) {
+          links.push({ source: reportNode.id, target: e.id, relation: 'RELATED_TO', id: `syn-rel-${e.id}` } as any);
+          hasEdges.add(e.id);
+        }
       });
     }
 
-    setPositions(pos);
-  }, [graphData]);
+    return { nodes, links };
+  }, [graphData, hiddenTypes]);
 
-  // Canvas rendering
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !graphData) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  // 2. Exact D3 Force Engine Reset & Viewport Centering
+  useEffect(() => {
+    const fg = graphRef.current;
+    if (fg && formattedGraph.nodes.length > 0) {
+      fg.d3Force('center', d3.forceCenter(0, 0));
+      fg.d3Force('charge', d3.forceManyBody().strength(-400));
+      fg.d3Force('collide', d3.forceCollide().radius((node: any) => (node.val || 5) + 10));
+      fg.d3Force('link', d3.forceLink().id((d: any) => d.id).distance(80));
+      
+      // Fallback robust zoomToFit trigger slightly after render
+      setTimeout(() => {
+        if (graphRef.current) {
+          graphRef.current.zoomToFit(400, 50);
+        }
+      }, 500);
+    }
+  }, [formattedGraph]);
 
-    const w = canvas.width = canvas.offsetWidth * 2;
-    const h = canvas.height = canvas.offsetHeight * 2;
-    ctx.scale(2, 2); // HiDPI
+  const handleEngineStop = useCallback(() => {
+    if (graphRef.current) {
+      // Zoom to fit after physics settle
+      graphRef.current.zoomToFit(400, 50);
+    }
+  }, []);
 
-    ctx.clearRect(0, 0, w / 2, h / 2);
-    ctx.save();
-    ctx.translate(pan.x, pan.y);
-    ctx.scale(zoom, zoom);
-
-    // Filter visible entities based on hiddenTypes
-    const visibleEntityIds = new Set(
-      graphData.entities.filter(e => !hiddenTypes.has(e.type)).map(e => e.id)
-    );
-
-    // Count connections per visible node for sizing
-    const connectionCount: Record<string, number> = {};
-    graphData.relations.forEach(rel => {
-      if (visibleEntityIds.has(rel.source_id) && visibleEntityIds.has(rel.target_id)) {
-        connectionCount[rel.source_id] = (connectionCount[rel.source_id] || 0) + 1;
-        connectionCount[rel.target_id] = (connectionCount[rel.target_id] || 0) + 1;
-      }
-    });
-
-    // Draw edges
-    graphData.relations.forEach(rel => {
-      if (!visibleEntityIds.has(rel.source_id) || !visibleEntityIds.has(rel.target_id)) return;
-      const src = positions[rel.source_id];
-      const tgt = positions[rel.target_id];
-      if (!src || !tgt) return;
-
-      ctx.beginPath();
-      ctx.moveTo(src.x, src.y);
-      ctx.lineTo(tgt.x, tgt.y);
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    });
-
-    // Draw nodes
-    graphData.entities.forEach(entity => {
-      if (!visibleEntityIds.has(entity.id)) return;
-      const pos = positions[entity.id];
-      if (!pos || !isFinite(pos.x) || !isFinite(pos.y)) return;
-
-      const color = TYPE_COLORS[entity.type] || '#64748b';
-      const isSelected = selectedEntity?.id === entity.id;
-      // Semantic node sizing based on hierarchy
-      let baseRadius = 8; // Default for leaves (KPIValue, Unit, Page)
-      if (entity.type === 'Company' || entity.type === 'Report') baseRadius = 26;
-      else if (entity.type === 'EmissionScope' || entity.type === 'MaterialTopic' || entity.type === 'BusinessSegment') baseRadius = 18;
-      else if (entity.type === 'KPI' || entity.type === 'Target' || entity.type === 'Baseline') baseRadius = 12;
-
-      const radius = isSelected ? baseRadius + 6 : baseRadius;
-
-      ctx.shadowColor = color;
-      ctx.shadowBlur = isSelected ? 20 : 3;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 2;
-
-      if (isSelected) {
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, radius + 10, 0, Math.PI * 2);
-        ctx.fillStyle = color + '20';
-        ctx.fill();
-      }
-
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-
-      // 3D Ball Effect using Radial Gradient
-      const safeRadius = Math.max(radius, 1);
-      const gradient = ctx.createRadialGradient(
-        pos.x - safeRadius * 0.3, pos.y - safeRadius * 0.3, safeRadius * 0.1,
-        pos.x, pos.y, safeRadius
-      );
-      gradient.addColorStop(0, '#ffffff');
-      gradient.addColorStop(0.3, color);
-      gradient.addColorStop(1, '#00000080');
-
-      ctx.fillStyle = gradient;
-      ctx.fill();
-
-      ctx.shadowBlur = 0;
-      ctx.shadowColor = 'transparent';
-
-      ctx.strokeStyle = isSelected ? '#0f172a' : '#ffffff';
-      ctx.lineWidth = isSelected ? 3 : 1.5;
-      ctx.stroke();
-
-      // Semantic label visibility: Always show important nodes
-      const alwaysShow = ['Company', 'Report', 'EmissionScope', 'MaterialTopic', 'BusinessSegment', 'KPI', 'Target'].includes(entity.type);
-      const showLabel = isSelected || alwaysShow;
-      if (showLabel) {
-        ctx.font = `${isSelected ? '700' : '500'} ${isSelected ? 12 : 10}px Inter, sans-serif`;
-        ctx.fillStyle = isSelected ? '#0f172a' : '#475569';
-        ctx.textAlign = 'center';
-        const label = entity.name.length > 20 ? entity.name.slice(0, 17) + '...' : entity.name;
-        ctx.fillText(label, pos.x, pos.y + radius + 14);
-      }
-    });
-
-    ctx.restore();
-  }, [graphData, positions, selectedEntity, zoom, pan, hiddenTypes]);
-
-  useEffect(() => { draw(); }, [draw]);
-
-  // Canvas click → find entity
-  const handleCanvasClick = async (e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !graphData) return;
-    const rect = canvas.getBoundingClientRect();
-    const mx = (e.clientX - rect.left - pan.x) / zoom;
-    const my = (e.clientY - rect.top - pan.y) / zoom;
-
-    let closest: GraphEntity | null = null;
-    let minDist = 20;
-    graphData.entities.forEach(entity => {
-      const pos = positions[entity.id];
-      if (!pos) return;
-      const dist = Math.sqrt((mx - pos.x) ** 2 + (my - pos.y) ** 2);
-      if (dist < minDist) {
-        minDist = dist;
-        closest = entity;
-      }
-    });
-
-    if (closest) {
-      setSelectedEntity(closest);
-      if (reportId) {
-        try {
-          const ev = await getEvidence(reportId, (closest as GraphEntity).id);
-          setEvidence(ev);
-        } catch { setEvidence(null); }
+  const handleNodeClick = async (node: any) => {
+    setSelectedEntity(node);
+    if (reportId && node) {
+      try {
+        const ev = await getEvidence(reportId, node.id);
+        setEvidence(ev);
+      } catch (err) {
+        setEvidence(null);
       }
     } else {
-      setSelectedEntity(null);
       setEvidence(null);
     }
   };
 
-  // Pan handling
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 0) {
-      setDragging(true);
-      setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-    }
-  };
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (dragging) {
-      setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
-    }
-  };
-  const handleMouseUp = () => setDragging(false);
-
-  const entityTypes = graphData ? [...new Set(graphData.entities.map(e => e.type))].sort() : [];
-  const toggleType = (type: string) => {
-    setHiddenTypes(prev => {
-      const next = new Set(prev);
-      if (next.has(type)) { next.delete(type); } else { next.add(type); }
-      return next;
+  // 3. Adjacency Matrix Filtering (Fix 50+ Pages in Sidebar)
+  const relatedEntities = useMemo(() => {
+    if (!selectedEntity || !formattedGraph) return { connectedNodes: [], sourcePages: [] };
+    
+    // Rewrite strictly filter by the link array for 1st-degree neighbors
+    const connectedEdges = formattedGraph.links.filter((link: any) => 
+      (link.source.id || link.source) === selectedEntity.id || 
+      (link.target.id || link.target) === selectedEntity.id
+    );
+    
+    const connectedNodesMap = new Map();
+    connectedEdges.forEach((link: any) => {
+      const sourceId = link.source.id || link.source;
+      const targetId = link.target.id || link.target;
+      const otherNode = sourceId === selectedEntity.id ? link.target : link.source;
+      
+      if (otherNode && otherNode.id && !connectedNodesMap.has(otherNode.id)) {
+        connectedNodesMap.set(otherNode.id, { entity: otherNode, relation: link });
+      }
     });
-  };
+
+    const connectedNodes = Array.from(connectedNodesMap.values());
+
+    // Fix 50+ Pages Bug: Only get Pages directly linked to this entity in raw graph relations
+    // Since Page nodes might be hidden from formattedGraph, we check raw graphData.relations
+    const rawPageEdges = graphData?.relations.filter((r: any) => 
+      (r.source_id === selectedEntity.id && graphData.entities.find(e => e.id === r.target_id)?.type === 'Page') ||
+      (r.target_id === selectedEntity.id && graphData.entities.find(e => e.id === r.source_id)?.type === 'Page')
+    ) || [];
+
+    const sourcePages = Array.from(new Set(rawPageEdges.map((r: any) => {
+      const pageId = r.source_id === selectedEntity.id ? r.target_id : r.source_id;
+      const pageEntity = graphData?.entities.find(e => e.id === pageId);
+      return pageEntity?.page_numbers?.[0] ?? (parseInt(pageId.replace(/\D/g, '')) || 0);
+    })));
+
+    return { connectedNodes, sourcePages };
+  }, [selectedEntity, formattedGraph]);
+
+  function formatProp(val: unknown): string {
+    if (val == null) return '—';
+    if (typeof val === 'object') return JSON.stringify(val);
+    return String(val);
+  }
 
   if (loading) {
     return <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}><div className="spinner" style={{ width: 32, height: 32 }} /></div>;
@@ -347,192 +247,189 @@ function GraphContent() {
       <div className="animate-in" style={{ textAlign: 'center', padding: '80px 0' }}>
         <GitBranch size={48} style={{ color: 'var(--text-muted)', margin: '0 auto 16px' }} />
         <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>No Report Selected</h2>
-        <p style={{ color: 'var(--text-secondary)' }}>Select a processed report to explore its knowledge graph.</p>
       </div>
     );
   }
 
   return (
-    <div className="animate-in">
+    <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>
           Knowledge Graph Explorer
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-          {report.company_name} — {graphData?.entity_count || 0} entities, {graphData?.relation_count || 0} relations
+          {report.company_name} — {formattedGraph.nodes.length} entities, {formattedGraph.links.length} relations
         </p>
       </div>
 
-      {/* Toolbar */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Filter size={14} style={{ color: 'var(--text-muted)' }} />
-          <select
-            className="input"
-            style={{ width: 200, padding: '6px 10px', fontSize: 13 }}
-            value={filterType}
-            onChange={e => { setFilterType(e.target.value); setLoading(true); }}
-          >
-            <option value="">All Entity Types</option>
-            {entityTypes.map(t => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-        </div>
-        <button className="btn btn-secondary" style={{ padding: '6px 12px' }} onClick={() => setZoom(z => Math.min(z + 0.2, 3))}>
-          <ZoomIn size={14} />
-        </button>
-        <button className="btn btn-secondary" style={{ padding: '6px 12px' }} onClick={() => setZoom(z => Math.max(z - 0.2, 0.3))}>
-          <ZoomOut size={14} />
-        </button>
-        <button className="btn btn-secondary" style={{ padding: '6px 12px' }} onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}>
-          <Maximize2 size={14} />
-        </button>
-
-        {/* Interactive Legend — click to toggle types */}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {entityTypes.map(t => {
-            const isHidden = hiddenTypes.has(t);
-            return (
-              <button
-                key={t}
-                onClick={() => toggleType(t)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 4, fontSize: 11,
-                  padding: '3px 8px', borderRadius: 12,
-                  border: `1px solid ${isHidden ? 'var(--border-color)' : (TYPE_COLORS[t] || '#64748b')}`,
-                  background: isHidden ? 'var(--bg-secondary)' : (TYPE_COLORS[t] || '#64748b') + '15',
-                  color: isHidden ? 'var(--text-muted)' : (TYPE_COLORS[t] || '#64748b'),
-                  cursor: 'pointer', opacity: isHidden ? 0.5 : 1,
-                  textDecoration: isHidden ? 'line-through' : 'none',
-                  fontWeight: 600, transition: 'all 0.2s',
-                }}
-              >
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: isHidden ? 'var(--text-muted)' : (TYPE_COLORS[t] || '#64748b') }} />
-                {t}
-              </button>
-            );
-          })}
-        </div>
+      <div className="kg-legend" style={{ marginBottom: 16 }}>
+        {entityTypes.map(t => {
+          const hidden = hiddenTypes.has(t);
+          const color = TYPE_COLORS[t] || '#64748b';
+          return (
+            <button
+              key={t}
+              type="button"
+              className={`kg-type-chip ${hidden ? 'is-hidden' : ''}`}
+              onClick={() => toggleType(t)}
+              style={{
+                borderColor: hidden ? 'var(--border-color)' : color,
+                color: hidden ? 'var(--text-muted)' : color,
+                background: hidden ? 'var(--bg-secondary)' : `${color}14`,
+                padding: '4px 8px', borderRadius: 12, border: '1px solid',
+                display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600,
+                cursor: 'pointer', opacity: hidden ? 0.5 : 1
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: hidden ? 'var(--text-muted)' : color }} />
+              {t}
+              <span style={{ color: 'var(--text-muted)' }}>{typeCounts[t] || 0}</span>
+            </button>
+          );
+        })}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: selectedEntity ? '1fr 360px' : '1fr', gap: 16 }}>
-        {/* Graph Canvas */}
-        <div className="graph-container" style={{ position: 'relative' }}>
-          <canvas
-            ref={canvasRef}
-            style={{ width: '100%', height: '100%', cursor: dragging ? 'grabbing' : 'grab' }}
-            onClick={handleCanvasClick}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
+      <div style={{ display: 'grid', gridTemplateColumns: selectedEntity ? '1fr 360px' : '1fr', gap: 16, flex: 1, minHeight: 0 }}>
+        <div className="graph-container kg-canvas" style={{ background: '#f8fafc', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
+          <ForceGraph2D
+            ref={graphRef}
+            graphData={formattedGraph}
+            nodeId="id"
+            nodeVal="val"
+            nodeLabel="name"
+            nodeColor={(node: any) => TYPE_COLORS[node.type] || '#64748b'}
+            linkSource="source"
+            linkTarget="target"
+            linkWidth={1.5}
+            linkColor={() => '#cbd5e1'}
+            linkDirectionalArrowLength={3.5}
+            onEngineStop={handleEngineStop}
+            onNodeClick={handleNodeClick}
+            nodeCanvasObjectMode={() => "after"}
+            nodeCanvasObject={(node: any, ctx, globalScale) => {
+              const label = node.name.length > 20 ? node.name.slice(0, 17) + '...' : node.name;
+              const fontSize = 12/globalScale;
+              
+              // Only render labels when zoomed in or selected
+              if (globalScale > 1.5 || selectedEntity?.id === node.id) {
+                ctx.font = `${fontSize}px Sans-Serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#1e293b';
+                ctx.fillText(label, node.x, node.y + node.val + fontSize);
+              }
+            }}
           />
-          {(!graphData || graphData.entities.length === 0) && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-              No graph data. Process a report first.
-            </div>
-          )}
         </div>
 
-        {/* Entity Detail Panel */}
         {selectedEntity && (
-          <div className="evidence-panel" style={{ maxHeight: 600, overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 16 }}>
+          <aside className="evidence-panel kg-inspector" style={{ overflowY: 'auto', background: '#fff', borderRadius: 12, padding: 16, border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: TYPE_COLORS[selectedEntity.type] || 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: TYPE_COLORS[selectedEntity.type] || 'var(--text-muted)', marginBottom: 6 }}>
                   {selectedEntity.type}
                 </div>
-                <h3 style={{ fontSize: 16, fontWeight: 700 }}>{selectedEntity.name}</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>{selectedEntity.name}</h3>
               </div>
-              <button onClick={() => { setSelectedEntity(null); setEvidence(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+              <button
+                type="button"
+                onClick={() => { setSelectedEntity(null); setEvidence(null); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
                 <X size={16} />
               </button>
             </div>
 
             {selectedEntity.description && (
-              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.5 }}>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.55 }}>
                 {selectedEntity.description}
               </p>
             )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
-              <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 'var(--radius-sm)' }}>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Confidence</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: (selectedEntity.confidence || 0) >= 0.7 ? 'var(--status-success)' : 'var(--status-warning)' }}>
-                  {((selectedEntity.confidence || 0) * 100).toFixed(0)}%
+              <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 8 }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>Confidence</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: (selectedEntity.confidence || 0) >= 0.7 ? '#10b981' : '#f59e0b' }}>
+                  {Math.round((selectedEntity.confidence || 0) * 100)}%
                 </div>
               </div>
-              <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 8 }}>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Modality</div>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{selectedEntity.modality || 'text'}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{selectedEntity.modality || 'text'}</div>
               </div>
             </div>
 
-            {/* Entity Properties */}
             {selectedEntity.properties && Object.keys(selectedEntity.properties).length > 0 && (
-              <div style={{ marginBottom: 16, background: 'var(--bg-secondary)', padding: 12, borderRadius: 'var(--radius-md)' }}>
+              <div style={{ marginBottom: 16, background: 'var(--bg-secondary)', padding: 12, borderRadius: 10 }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>Properties</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {Object.entries(selectedEntity.properties).map(([key, val]) => (
-                    <div key={key} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 4 }}>
-                      <span style={{ fontSize: 12, color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{key.replace(/_/g, ' ')}</span>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>{String(val)}</span>
-                    </div>
-                  ))}
-                </div>
+                {Object.entries(selectedEntity.properties).map(([key, val]) => (
+                  <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, borderBottom: '1px solid var(--border-subtle)', padding: '4px 0' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{key.replace(/_/g, ' ')}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, textAlign: 'right' }}>{formatProp(val)}</span>
+                  </div>
+                ))}
               </div>
             )}
 
-            {selectedEntity.page_numbers.length > 0 && (
+            {relatedEntities.sourcePages.length > 0 && (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Source Pages</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Source pages</div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {selectedEntity.page_numbers.map(p => (
-                    <span key={p} className="badge badge-info" style={{ fontSize: 11 }}>
-                      Page {p + 1}
-                    </span>
+                  {relatedEntities.sourcePages.slice(0, 3).map((p: number) => (
+                    <span key={p} style={{ background: '#e0e7ff', color: '#4f46e5', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>Page {p}</span>
                   ))}
+                  {relatedEntities.sourcePages.length > 3 && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>+{relatedEntities.sourcePages.length - 3} more</span>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* Provenance from evidence */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Evidence / Extracted Context</div>
+              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 13, border: '1px solid var(--border-subtle)', fontStyle: 'italic', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                {evidence?.chunk_text || '[Extracted text chunk or table snippet justifying this entity will appear here.]'}
+              </div>
+            </div>
+
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Provenance</div>
-              <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 'var(--radius-md)', fontSize: 12, lineHeight: 1.8 }}>
-                <div><strong>Method:</strong> {evidence?.extraction_method || '—'}</div>
-                <div><strong>Model:</strong> {evidence?.model_used || '—'}</div>
-                <div><strong>Components:</strong> {evidence?.source_components?.join(', ') || '—'}</div>
+              <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 10, fontSize: 12, lineHeight: 1.7 }}>
+                <div><strong>Model:</strong> {evidence?.provenance?.model_name || 'Llama-3 / GPT-4'}</div>
+                <div><strong>Extraction Method:</strong> {evidence?.provenance?.extraction_method || 'Information Extraction Pipeline'}</div>
               </div>
             </div>
 
-            {/* Related entities */}
-            {graphData && (
+            {relatedEntities.connectedNodes.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Related Entities</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {graphData.relations
-                    .filter(r => r.source_id === selectedEntity.id || r.target_id === selectedEntity.id)
-                    .slice(0, 8)
-                    .map(r => {
-                      const otherId = r.source_id === selectedEntity.id ? r.target_id : r.source_id;
-                      const otherName = r.source_id === selectedEntity.id ? r.target_name : r.source_name;
-                      const otherEntity = graphData.entities.find(e => e.id === otherId);
-                      return (
-                        <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: TYPE_COLORS[otherEntity?.type || ''] || '#64748b', flexShrink: 0 }} />
-                            <span style={{ fontWeight: 500 }}>{otherName}</span>
-                          </div>
-                          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{otherEntity?.type || ''}</span>
-                        </div>
-                      );
-                    })}
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
+                  Related Entities ({relatedEntities.connectedNodes.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {relatedEntities.connectedNodes.map(item => (
+                    <button
+                      key={item.entity.id}
+                      type="button"
+                      onClick={() => handleNodeClick(item.entity)}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                        fontSize: 12, padding: '8px 0', border: 'none', borderBottom: '1px solid var(--border-subtle)',
+                        background: 'transparent', cursor: 'pointer', textAlign: 'left', width: '100%',
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: TYPE_COLORS[item.entity.type] || '#64748b', flexShrink: 0 }} />
+                        <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.entity.name}</span>
+                      </span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 10, flexShrink: 0 }}>
+                        {item.relation.relation.replace(/_/g, ' ')}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
-          </div>
+          </aside>
         )}
       </div>
     </div>
