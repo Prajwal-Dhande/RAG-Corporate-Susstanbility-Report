@@ -222,10 +222,40 @@ function DashboardContent() {
         </div>
       </div>
 
-      {/* KPI List */}
+      {/* Analytical Charts */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 24, marginBottom: 24 }}>
+        {/* Top Metrics Chart */}
+        <div className="card animate-slide-up stagger-6 opacity-0" style={{ padding: 24 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>Top Reported Metrics (By Page Coverage)</h3>
+          <div style={{ height: 300 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart 
+                data={Object.values(kpis.kpis.reduce((acc, kpi) => {
+                  acc[kpi.name] = (acc[kpi.name] || new Set()).add(kpi.page_numbers?.[0]);
+                  return acc;
+                }, {} as Record<string, Set<number>>))
+                  .map((pages, i, arr) => ({ name: Object.keys(kpis.kpis.reduce((a, k) => { a[k.name]=1; return a; }, {} as Record<string,any>))[i] || '', pages: pages.size }))
+                  .sort((a, b) => b.pages - a.pages)
+                  .slice(0, 5)
+                  .map(d => ({ ...d, name: d.name.length > 18 ? d.name.substring(0, 15) + '...' : d.name }))} 
+                layout="vertical" 
+                margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border-subtle)" />
+                <XAxis type="number" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} width={100} />
+                <Tooltip cursor={{ fill: 'var(--bg-secondary)' }} contentStyle={{ background: 'var(--bg-card)', border: 'none', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }} />
+                <Bar dataKey="pages" fill="var(--accent-emerald)" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} animationBegin={600} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Grouped KPI List */}
       <div className="card" style={{ overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)' }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700 }}>Extracted KPIs</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 700 }}>Consolidated Extracted KPIs</h3>
         </div>
         {kpis.kpis.length > 0 ? (
           <table className="data-table">
@@ -233,32 +263,43 @@ function DashboardContent() {
               <tr>
                 <th>KPI Name</th>
                 <th>Description</th>
-                <th>Confidence</th>
+                <th>Avg Confidence</th>
                 <th>Source Pages</th>
               </tr>
             </thead>
             <tbody>
-              {kpis.kpis.map(kpi => (
-                <tr key={kpi.id}>
-                  <td style={{ fontWeight: 600 }}>{kpi.name}</td>
-                  <td style={{ color: 'var(--text-secondary)', fontSize: 13, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {kpi.description || '—'}
-                  </td>
-                  <td>
-                    <div className={`confidence-bar ${kpi.confidence >= 0.7 ? 'confidence-high' : kpi.confidence >= 0.4 ? 'confidence-mid' : 'confidence-low'}`}>
-                      <div className="confidence-track">
-                        <div className="confidence-fill" style={{ width: `${(kpi.confidence || 0) * 100}%` }} />
+              {Object.values(kpis.kpis.reduce((acc, kpi) => {
+                if (!acc[kpi.name]) {
+                  acc[kpi.name] = { id: kpi.name, name: kpi.name, description: kpi.description, confs: [], pages: new Set<number>() };
+                }
+                acc[kpi.name].confs.push(kpi.confidence || 0);
+                kpi.page_numbers?.forEach(p => acc[kpi.name].pages.add(p));
+                return acc;
+              }, {} as Record<string, any>)).map(g => {
+                const avgConf = g.confs.reduce((a: number, b: number) => a + b, 0) / g.confs.length;
+                const sortedPages = Array.from(g.pages).sort((a: any, b: any) => a - b);
+                return (
+                  <tr key={g.id}>
+                    <td style={{ fontWeight: 600 }}>{g.name}</td>
+                    <td style={{ color: 'var(--text-secondary)', fontSize: 13, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {g.description || '—'}
+                    </td>
+                    <td>
+                      <div className={`confidence-bar ${avgConf >= 0.7 ? 'confidence-high' : avgConf >= 0.4 ? 'confidence-mid' : 'confidence-low'}`}>
+                        <div className="confidence-track">
+                          <div className="confidence-fill" style={{ width: `${avgConf * 100}%` }} />
+                        </div>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 36 }}>
+                          {(avgConf * 100).toFixed(0)}%
+                        </span>
                       </div>
-                      <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 36 }}>
-                        {((kpi.confidence || 0) * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {kpi.page_numbers?.map(p => p + 1).join(', ') || '—'}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      {sortedPages.map((p: any) => p + 1).join(', ') || '—'}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         ) : (

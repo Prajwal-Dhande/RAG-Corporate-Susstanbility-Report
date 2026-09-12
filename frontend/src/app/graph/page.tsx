@@ -59,7 +59,7 @@ function GraphContent() {
     })();
   }, [reportId, filterType]);
 
-  // Layout — force-directed simplified
+  // Layout — group by type in concentric rings
   useEffect(() => {
     if (!graphData || graphData.entities.length === 0) return;
     const pos: Record<string, { x: number; y: number }> = {};
@@ -117,7 +117,7 @@ function GraphContent() {
       ctx.beginPath();
       ctx.moveTo(src.x, src.y);
       ctx.lineTo(tgt.x, tgt.y);
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)'; // Darker slate for light mode
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
     });
@@ -131,7 +131,6 @@ function GraphContent() {
       const isSelected = selectedEntity?.id === entity.id;
       const radius = isSelected ? 12 : 7;
 
-      // Glow / Shadow effect
       ctx.shadowColor = color;
       ctx.shadowBlur = isSelected ? 20 : 5;
       ctx.shadowOffsetX = 0;
@@ -146,20 +145,20 @@ function GraphContent() {
 
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-      
+
       // 3D Ball Effect using Radial Gradient
+      const safeRadius = Math.max(radius, 1);
       const gradient = ctx.createRadialGradient(
-        pos.x - radius * 0.3, pos.y - radius * 0.3, radius * 0.1, // Highlight source
-        pos.x, pos.y, radius // Outer edge
+        pos.x - safeRadius * 0.3, pos.y - safeRadius * 0.3, safeRadius * 0.1,
+        pos.x, pos.y, safeRadius
       );
-      gradient.addColorStop(0, '#ffffff'); // Shiny highlight
-      gradient.addColorStop(0.3, color); // Base color
-      gradient.addColorStop(1, '#00000080'); // Dark shadow on the edge
-      
+      gradient.addColorStop(0, '#ffffff');
+      gradient.addColorStop(0.3, color);
+      gradient.addColorStop(1, '#00000080');
+
       ctx.fillStyle = gradient;
       ctx.fill();
-      
-      // Reset shadow for stroke and text
+
       ctx.shadowBlur = 0;
       ctx.shadowColor = 'transparent';
 
@@ -169,7 +168,7 @@ function GraphContent() {
 
       // Label
       ctx.font = `${isSelected ? '700' : '500'} ${isSelected ? 12 : 10}px Inter, sans-serif`;
-      ctx.fillStyle = isSelected ? '#0f172a' : '#334155'; // Dark slate for light mode
+      ctx.fillStyle = isSelected ? '#0f172a' : '#334155';
       ctx.textAlign = 'center';
       const label = entity.name.length > 25 ? entity.name.slice(0, 22) + '...' : entity.name;
       ctx.fillText(label, pos.x, pos.y + radius + 14);
@@ -345,6 +344,21 @@ function GraphContent() {
               </div>
             </div>
 
+            {/* Entity Properties */}
+            {selectedEntity.properties && Object.keys(selectedEntity.properties).length > 0 && (
+              <div style={{ marginBottom: 16, background: 'var(--bg-secondary)', padding: 12, borderRadius: 'var(--radius-md)' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>Properties</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {Object.entries(selectedEntity.properties).map(([key, val]) => (
+                    <div key={key} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 4 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{key.replace(/_/g, ' ')}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>{String(val)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {selectedEntity.page_numbers.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Source Pages</div>
@@ -359,27 +373,38 @@ function GraphContent() {
             )}
 
             {/* Provenance from evidence */}
-            {evidence && (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>Provenance</div>
-                <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 'var(--radius-sm)', fontSize: 12 }}>
-                  <div><strong>Method:</strong> {evidence.provenance.extraction_method}</div>
-                  <div><strong>Model:</strong> {evidence.provenance.model_name}</div>
-                  <div><strong>Components:</strong> {evidence.provenance.source_component_ids.join(', ') || '—'}</div>
-                </div>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Provenance</div>
+              <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 'var(--radius-md)', fontSize: 12, lineHeight: 1.8 }}>
+                <div><strong>Method:</strong> {evidence?.extraction_method || '—'}</div>
+                <div><strong>Model:</strong> {evidence?.model_used || '—'}</div>
+                <div><strong>Components:</strong> {evidence?.source_components?.join(', ') || '—'}</div>
+              </div>
+            </div>
 
-                {evidence.related_entities.length > 0 && (
-                  <div style={{ marginTop: 12 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Related Entities</div>
-                    {evidence.related_entities.slice(0, 10).map(re => (
-                      <div key={re.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 12, borderBottom: '1px solid var(--border-subtle)' }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: TYPE_COLORS[re.type] || '#64748b' }} />
-                        <span style={{ flex: 1 }}>{re.name}</span>
-                        <span style={{ color: 'var(--text-muted)' }}>{re.type}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+            {/* Related entities */}
+            {graphData && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Related Entities</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {graphData.relations
+                    .filter(r => r.source_id === selectedEntity.id || r.target_id === selectedEntity.id)
+                    .slice(0, 8)
+                    .map(r => {
+                      const otherId = r.source_id === selectedEntity.id ? r.target_id : r.source_id;
+                      const otherName = r.source_id === selectedEntity.id ? r.target_name : r.source_name;
+                      const otherEntity = graphData.entities.find(e => e.id === otherId);
+                      return (
+                        <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: TYPE_COLORS[otherEntity?.type || ''] || '#64748b', flexShrink: 0 }} />
+                            <span style={{ fontWeight: 500 }}>{otherName}</span>
+                          </div>
+                          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{otherEntity?.type || ''}</span>
+                        </div>
+                      );
+                    })}
+                </div>
               </div>
             )}
           </div>
@@ -391,7 +416,7 @@ function GraphContent() {
 
 export default function GraphPage() {
   return (
-    <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}><div className="spinner" style={{ width: 32, height: 32 }} /></div>}>
+    <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}><div className="spinner" style={{ width: 32, height: 32 }} /></div>}>
       <GraphContent />
     </Suspense>
   );
