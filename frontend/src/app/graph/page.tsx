@@ -36,6 +36,7 @@ function GraphContent() {
   const [selectedEntity, setSelectedEntity] = useState<GraphEntity | null>(null);
   const [evidence, setEvidence] = useState<EvidenceData | null>(null);
   const [filterType, setFilterType] = useState<string>('');
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(['Page']));
   const [loading, setLoading] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
@@ -59,35 +60,110 @@ function GraphContent() {
     })();
   }, [reportId, filterType]);
 
-  // Layout — group by type in concentric rings
+  // Layout — Force-directed physics simulation
   useEffect(() => {
     if (!graphData || graphData.entities.length === 0) return;
-    const pos: Record<string, { x: number; y: number }> = {};
+    const pos: Record<string, { x: number; y: number; vx: number; vy: number }> = {};
     const entities = graphData.entities;
-    const cx = 400, cy = 300;
+    const relations = graphData.relations;
+    const cx = window.innerWidth / 2 || 400;
+    const cy = window.innerHeight / 2 || 300;
 
-    // Group by type
-    const typeGroups: Record<string, GraphEntity[]> = {};
+    // 1. Initialize randomly around center
     entities.forEach(e => {
-      const t = e.type;
-      if (!typeGroups[t]) typeGroups[t] = [];
-      typeGroups[t].push(e);
+      pos[e.id] = {
+        x: cx + (Math.random() - 0.5) * 600,
+        y: cy + (Math.random() - 0.5) * 600,
+        vx: 0, vy: 0
+      };
     });
 
-    const typeKeys = Object.keys(typeGroups);
-    typeKeys.forEach((type, ti) => {
-      const group = typeGroups[type];
-      const angle0 = (2 * Math.PI * ti) / typeKeys.length;
-      const radius = 180 + group.length * 5;
-      group.forEach((e, ei) => {
-        const spread = group.length > 1 ? (Math.PI / 3) * ((ei / (group.length - 1)) - 0.5) : 0;
-        const a = angle0 + spread;
-        pos[e.id] = {
-          x: cx + radius * Math.cos(a) + (Math.random() - 0.5) * 30,
-          y: cy + radius * Math.sin(a) + (Math.random() - 0.5) * 30,
-        };
+    // 2. Simulate physics synchronously (Fruchterman-Reingold with Hierarchical Radial Gravity)
+    const k = Math.sqrt((800 * 600) / (entities.length || 1)) * 1.5; // Optimal distance
+
+    // Radius map for semantic hierarchy
+    const typeRadius: Record<string, number> = {
+      'Company': 0,
+      'Report': 0,
+      'EmissionScope': 120,
+      'MaterialTopic': 120,
+      'BusinessSegment': 120,
+      'KPI': 250,
+      'Target': 250,
+      'Baseline': 250,
+    };
+    const defaultRadius = 380; // KPIValue, Unit, Page, etc.
+    
+    for (let iter = 0; iter < 150; iter++) {
+      // Repulsion
+      for (let i = 0; i < entities.length; i++) {
+        for (let j = i + 1; j < entities.length; j++) {
+          const u = pos[entities[i].id];
+          const v = pos[entities[j].id];
+          let dx = u.x - v.x;
+          let dy = u.y - v.y;
+          if (dx === 0 && dy === 0) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); }
+          const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+          if (dist < k * 2) {
+            // Decrease repulsion by 50%
+            const force = ((k * k) / dist) * 0.5;
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            u.vx += fx; u.vy += fy;
+            v.vx -= fx; v.vy -= fy;
+          }
+        }
+      }
+
+      // Attraction (Edges)
+      relations.forEach(rel => {
+        const u = pos[rel.source_id];
+        const v = pos[rel.target_id];
+        if (!u || !v) return;
+        let dx = u.x - v.x;
+        let dy = u.y - v.y;
+        if (dx === 0 && dy === 0) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); }
+        const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+        // Tighten springs: Increase attraction by 300%
+        const force = (dist * dist) / k;
+        const fx = (dx / dist) * force * 1.5;
+        const fy = (dy / dist) * force * 1.5;
+        u.vx -= fx; u.vy -= fy;
+        v.vx += fx; v.vy += fy;
       });
-    });
+
+      // Hierarchical Radial Gravity and Position Update
+      entities.forEach(e => {
+        const u = pos[e.id];
+        
+        const targetR = typeRadius[e.type] ?? defaultRadius;
+        const angle = Math.atan2(u.y - cy, u.x - cx);
+        const targetX = cx + Math.cos(angle) * targetR;
+        const targetY = cy + Math.sin(angle) * targetR;
+        
+        // Strong pull towards the target semantic ring
+        u.vx += (targetX - u.x) * 0.12; 
+        u.vy += (targetY - u.y) * 0.12;
+        
+        // Clamp velocity to prevent physics explosion
+        const speed = Math.sqrt(u.vx * u.vx + u.vy * u.vy);
+        const maxSpeed = 50;
+        if (speed > maxSpeed) {
+           u.vx = (u.vx / speed) * maxSpeed;
+           u.vy = (u.vy / speed) * maxSpeed;
+        }
+
+        u.vx *= 0.6; // Friction
+        u.vy *= 0.6;
+        
+        u.x += u.vx;
+        u.y += u.vy;
+        
+        // Failsafe for NaN
+        if (!isFinite(u.x) || isNaN(u.x)) u.x = cx + Math.random() * 10;
+        if (!isFinite(u.y) || isNaN(u.y)) u.y = cy + Math.random() * 10;
+      });
+    }
 
     setPositions(pos);
   }, [graphData]);
@@ -108,8 +184,23 @@ function GraphContent() {
     ctx.translate(pan.x, pan.y);
     ctx.scale(zoom, zoom);
 
+    // Filter visible entities based on hiddenTypes
+    const visibleEntityIds = new Set(
+      graphData.entities.filter(e => !hiddenTypes.has(e.type)).map(e => e.id)
+    );
+
+    // Count connections per visible node for sizing
+    const connectionCount: Record<string, number> = {};
+    graphData.relations.forEach(rel => {
+      if (visibleEntityIds.has(rel.source_id) && visibleEntityIds.has(rel.target_id)) {
+        connectionCount[rel.source_id] = (connectionCount[rel.source_id] || 0) + 1;
+        connectionCount[rel.target_id] = (connectionCount[rel.target_id] || 0) + 1;
+      }
+    });
+
     // Draw edges
     graphData.relations.forEach(rel => {
+      if (!visibleEntityIds.has(rel.source_id) || !visibleEntityIds.has(rel.target_id)) return;
       const src = positions[rel.source_id];
       const tgt = positions[rel.target_id];
       if (!src || !tgt) return;
@@ -117,28 +208,35 @@ function GraphContent() {
       ctx.beginPath();
       ctx.moveTo(src.x, src.y);
       ctx.lineTo(tgt.x, tgt.y);
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+      ctx.lineWidth = 1;
       ctx.stroke();
     });
 
     // Draw nodes
     graphData.entities.forEach(entity => {
+      if (!visibleEntityIds.has(entity.id)) return;
       const pos = positions[entity.id];
-      if (!pos) return;
+      if (!pos || !isFinite(pos.x) || !isFinite(pos.y)) return;
 
       const color = TYPE_COLORS[entity.type] || '#64748b';
       const isSelected = selectedEntity?.id === entity.id;
-      const radius = isSelected ? 12 : 7;
+      // Semantic node sizing based on hierarchy
+      let baseRadius = 8; // Default for leaves (KPIValue, Unit, Page)
+      if (entity.type === 'Company' || entity.type === 'Report') baseRadius = 26;
+      else if (entity.type === 'EmissionScope' || entity.type === 'MaterialTopic' || entity.type === 'BusinessSegment') baseRadius = 18;
+      else if (entity.type === 'KPI' || entity.type === 'Target' || entity.type === 'Baseline') baseRadius = 12;
+
+      const radius = isSelected ? baseRadius + 6 : baseRadius;
 
       ctx.shadowColor = color;
-      ctx.shadowBlur = isSelected ? 20 : 5;
+      ctx.shadowBlur = isSelected ? 20 : 3;
       ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 4;
+      ctx.shadowOffsetY = 2;
 
       if (isSelected) {
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 22, 0, Math.PI * 2);
+        ctx.arc(pos.x, pos.y, radius + 10, 0, Math.PI * 2);
         ctx.fillStyle = color + '20';
         ctx.fill();
       }
@@ -166,16 +264,20 @@ function GraphContent() {
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
 
-      // Label
-      ctx.font = `${isSelected ? '700' : '500'} ${isSelected ? 12 : 10}px Inter, sans-serif`;
-      ctx.fillStyle = isSelected ? '#0f172a' : '#334155';
-      ctx.textAlign = 'center';
-      const label = entity.name.length > 25 ? entity.name.slice(0, 22) + '...' : entity.name;
-      ctx.fillText(label, pos.x, pos.y + radius + 14);
+      // Semantic label visibility: Always show important nodes
+      const alwaysShow = ['Company', 'Report', 'EmissionScope', 'MaterialTopic', 'BusinessSegment', 'KPI', 'Target'].includes(entity.type);
+      const showLabel = isSelected || alwaysShow;
+      if (showLabel) {
+        ctx.font = `${isSelected ? '700' : '500'} ${isSelected ? 12 : 10}px Inter, sans-serif`;
+        ctx.fillStyle = isSelected ? '#0f172a' : '#475569';
+        ctx.textAlign = 'center';
+        const label = entity.name.length > 20 ? entity.name.slice(0, 17) + '...' : entity.name;
+        ctx.fillText(label, pos.x, pos.y + radius + 14);
+      }
     });
 
     ctx.restore();
-  }, [graphData, positions, selectedEntity, zoom, pan]);
+  }, [graphData, positions, selectedEntity, zoom, pan, hiddenTypes]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -227,7 +329,14 @@ function GraphContent() {
   };
   const handleMouseUp = () => setDragging(false);
 
-  const entityTypes = graphData ? [...new Set(graphData.entities.map(e => e.type))] : [];
+  const entityTypes = graphData ? [...new Set(graphData.entities.map(e => e.type))].sort() : [];
+  const toggleType = (type: string) => {
+    setHiddenTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) { next.delete(type); } else { next.add(type); }
+      return next;
+    });
+  };
 
   if (loading) {
     return <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}><div className="spinner" style={{ width: 32, height: 32 }} /></div>;
@@ -280,14 +389,30 @@ function GraphContent() {
           <Maximize2 size={14} />
         </button>
 
-        {/* Legend */}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {entityTypes.slice(0, 6).map(t => (
-            <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: TYPE_COLORS[t] || '#64748b' }} />
-              {t}
-            </div>
-          ))}
+        {/* Interactive Legend — click to toggle types */}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {entityTypes.map(t => {
+            const isHidden = hiddenTypes.has(t);
+            return (
+              <button
+                key={t}
+                onClick={() => toggleType(t)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4, fontSize: 11,
+                  padding: '3px 8px', borderRadius: 12,
+                  border: `1px solid ${isHidden ? 'var(--border-color)' : (TYPE_COLORS[t] || '#64748b')}`,
+                  background: isHidden ? 'var(--bg-secondary)' : (TYPE_COLORS[t] || '#64748b') + '15',
+                  color: isHidden ? 'var(--text-muted)' : (TYPE_COLORS[t] || '#64748b'),
+                  cursor: 'pointer', opacity: isHidden ? 0.5 : 1,
+                  textDecoration: isHidden ? 'line-through' : 'none',
+                  fontWeight: 600, transition: 'all 0.2s',
+                }}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: isHidden ? 'var(--text-muted)' : (TYPE_COLORS[t] || '#64748b') }} />
+                {t}
+              </button>
+            );
+          })}
         </div>
       </div>
 
