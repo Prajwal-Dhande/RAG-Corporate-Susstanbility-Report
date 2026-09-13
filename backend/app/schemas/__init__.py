@@ -154,8 +154,10 @@ class GraphRelationResponse(BaseModel):
 
 
 class GraphResponse(BaseModel):
-    entities: list[GraphEntityResponse] = []
-    relations: list[GraphRelationResponse] = []
+    entities: Optional[list[GraphEntityResponse]] = []
+    relations: Optional[list[GraphRelationResponse]] = []
+    nodes: Optional[list[Any]] = []
+    links: Optional[list[Any]] = []
     entity_count: int = 0
     relation_count: int = 0
 

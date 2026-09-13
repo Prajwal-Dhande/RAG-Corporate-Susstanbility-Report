@@ -203,58 +203,69 @@ class ProcessingPipeline:
             await _progress("graph", 0.0, "Building knowledge graph...")
             start = time.time()
 
-            # Add report entity
-            report_entity = GraphEntity(
-                id=report_id,
-                name=file_name,
-                type=EntityType.REPORT,
-                report_id=report_id,
-                confidence=1.0,
-                properties=metadata.to_dict(),
-            )
-            await self.graph.add_entity(report_entity)
-
-            # Add page entities
-            for parsed_page in parsed_pages:
-                page_entity = GraphEntity(
-                    id=parsed_page.page_id,
-                    name=f"Page {parsed_page.page_number + 1}",
-                    type=EntityType.PAGE,
+            if type(self.graph).__name__ == "Neo4jBackend":
+                await self.graph.ingest_pipeline_results(
                     report_id=report_id,
-                    page_numbers=[parsed_page.page_number],
-                    confidence=1.0,
-                    properties={"component_count": len(parsed_page.components)},
+                    company_name=metadata.company_name or file_name,
+                    fiscal_year=metadata.fiscal_year or 2024,
+                    total_pages=total_pages,
+                    entities=all_entities,
+                    relations=all_relations,
+                    parsed_pages=parsed_pages
                 )
-                await self.graph.add_entity(page_entity)
-                await self.graph.add_relation(GraphRelation(
-                    id=str(uuid.uuid4())[:8],
-                    source_id=report_id,
-                    relation=RelationType.CONTAINS_PAGE,
-                    target_id=parsed_page.page_id,
+            else:
+                # Add report entity
+                report_entity = GraphEntity(
+                    id=report_id,
+                    name=file_name,
+                    type=EntityType.REPORT,
                     report_id=report_id,
                     confidence=1.0,
-                ))
+                    properties=metadata.to_dict(),
+                )
+                await self.graph.add_entity(report_entity)
 
-            # Add extracted entities and relations
-            for entity in all_entities:
-                await self.graph.add_entity(entity)
-                # Link to page
-                for page_num in entity.page_numbers:
-                    matching_pages = [p for p in parsed_pages if p.page_number == page_num]
-                    if matching_pages:
-                        await self.graph.add_relation(GraphRelation(
-                            id=str(uuid.uuid4())[:8],
-                            source_id=entity.id,
-                            relation=RelationType.MENTIONED_ON,
-                            target_id=matching_pages[0].page_id,
-                            report_id=report_id,
-                            confidence=entity.confidence,
-                        ))
+                # Add page entities
+                for parsed_page in parsed_pages:
+                    page_entity = GraphEntity(
+                        id=parsed_page.page_id,
+                        name=f"Page {parsed_page.page_number + 1}",
+                        type=EntityType.PAGE,
+                        report_id=report_id,
+                        page_numbers=[parsed_page.page_number],
+                        confidence=1.0,
+                        properties={"component_count": len(parsed_page.components)},
+                    )
+                    await self.graph.add_entity(page_entity)
+                    await self.graph.add_relation(GraphRelation(
+                        id=str(uuid.uuid4())[:8],
+                        source_id=report_id,
+                        relation=RelationType.CONTAINS_PAGE,
+                        target_id=parsed_page.page_id,
+                        report_id=report_id,
+                        confidence=1.0,
+                    ))
 
-            for relation in all_relations:
-                await self.graph.add_relation(relation)
+                # Add extracted entities and relations
+                for entity in all_entities:
+                    await self.graph.add_entity(entity)
+                    # Link to page
+                    for page_num in entity.page_numbers:
+                        matching_pages = [p for p in parsed_pages if p.page_number == page_num]
+                        if matching_pages:
+                            await self.graph.add_relation(GraphRelation(
+                                id=str(uuid.uuid4())[:8],
+                                source_id=entity.id,
+                                relation=RelationType.MENTIONED_ON,
+                                target_id=matching_pages[0].page_id,
+                                report_id=report_id,
+                                confidence=entity.confidence,
+                            ))
 
-            await self.graph.save()
+                for relation in all_relations:
+                    await self.graph.add_relation(relation)
+
+                await self.graph.save()
 
             # Count KPIs and targets
             kpi_count = len([e for e in all_entities if e.type == EntityType.KPI])

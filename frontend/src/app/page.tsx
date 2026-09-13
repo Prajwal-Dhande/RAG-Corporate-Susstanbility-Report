@@ -191,8 +191,9 @@ export default function ReportsPage() {
             No reports yet. Upload a sustainability PDF to get started.
           </div>
         ) : (
-          <table className="data-table">
-            <thead>
+          <div style={{ overflowX: 'auto', width: '100%' }}>
+            <table className="data-table" style={{ width: '100%', minWidth: 900 }}>
+              <thead>
               <tr>
                 <th>Report</th>
                 <th>Company</th>
@@ -202,7 +203,7 @@ export default function ReportsPage() {
                 <th>KPIs</th>
                 <th>Targets</th>
                 <th>Status</th>
-                <th></th>
+                <th style={{ minWidth: 100, width: 100, textAlign: 'right', paddingRight: 24 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -252,37 +253,54 @@ export default function ReportsPage() {
                     </div>
                   </td>
                   <td>{statusBadge(report.status)}</td>
-                  <td style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    {!['completed', 'failed'].includes(report.status) && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div style={{ width: 100 }}>
-                          <div className="progress-bar">
-                            <div className="progress-fill" style={{ width: `${(report.processing_progress || 0) * 100}%` }} />
+                  <td style={{ paddingRight: 24, minWidth: 100, width: 100 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
+                      {!['completed', 'failed'].includes(report.status) && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginRight: 8 }}>
+                          <div style={{ width: 100 }}>
+                            <div className="progress-bar">
+                              <div className="progress-fill" style={{ width: `${(report.processing_progress || 0) * 100}%` }} />
+                            </div>
                           </div>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'right' }}>
+                            {report.processing_message || 'Processing...'}
+                          </span>
                         </div>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                          {report.processing_message || 'Processing...'}
-                        </span>
-                      </div>
-                    )}
-                    {report.status === 'completed' && (
-                      <div>
-                        <ChevronRight size={16} style={{ color: 'var(--text-muted)' }} />
-                      </div>
-                    )}
-                    <button 
-                      onClick={(e) => handleDelete(e, report.id)}
-                      className="btn-icon" 
-                      style={{ padding: 4, background: 'transparent', border: 'none', cursor: 'pointer' }}
-                      title="Delete Report"
-                    >
-                      <Trash2 size={16} style={{ color: 'var(--status-error)' }} />
-                    </button>
+                      )}
+                      {report.status === 'completed' && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <ChevronRight size={18} style={{ color: 'var(--text-muted)' }} />
+                        </div>
+                      )}
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(e, report.id);
+                        }}
+                        className="btn-icon" 
+                        style={{ 
+                          padding: 6, 
+                          background: 'rgba(239, 68, 68, 0.08)', 
+                          borderRadius: 6, 
+                          border: '1px solid rgba(239, 68, 68, 0.2)', 
+                          cursor: 'pointer', 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'center',
+                          color: 'var(--status-error)',
+                          transition: 'all 0.2s'
+                        }}
+                        title="Delete Report"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

@@ -26,6 +26,7 @@ from mmkg.ontology import (
     GraphRelation,
     RelationType,
 )
+from mmkg.neo4j_backend import Neo4jBackend
 
 logger = logging.getLogger(__name__)
 
@@ -343,11 +344,13 @@ class NetworkXBackend(GraphBackend):
         )
 
 
-def get_graph_backend() -> GraphBackend:
+def get_graph_backend() -> GraphBackend | Neo4jBackend:
     """Factory: return the configured graph backend."""
     settings = get_settings()
     if settings.graph_backend == "neo4j":
-        # TODO: Implement Neo4jBackend when Neo4j is available
-        logger.warning("Neo4j backend not implemented, falling back to NetworkX")
-        return NetworkXBackend()
+        # Ensure we have the neo4j uri, user, password from settings
+        uri = getattr(settings, 'neo4j_uri', 'bolt://neo4j:7687')
+        user = getattr(settings, 'neo4j_user', 'neo4j')
+        password = getattr(settings, 'neo4j_password', 'password')
+        return Neo4jBackend(uri, user, password)
     return NetworkXBackend()

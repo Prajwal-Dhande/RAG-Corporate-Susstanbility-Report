@@ -154,6 +154,10 @@ export async function getReportGraph(id: string, entityType?: string): Promise<G
   return data;
 }
 
+export async function getReportStats(reportId: string) {
+  const { data } = await api.get(`/api/reports/${reportId}/stats`);
+  return data;
+}
 export async function getGraphEntity(reportId: string, entityId: string) {
   const { data } = await api.get(`/api/reports/${reportId}/graph/entity/${entityId}`);
   return data;

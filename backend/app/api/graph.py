@@ -26,6 +26,9 @@ async def get_report_graph(
     """Get the knowledge graph for a report."""
     graph = get_graph_backend()
 
+    if type(graph).__name__ == "Neo4jBackend":
+        return await graph.get_graph_for_d3(report_id)
+
     if entity_type:
         entities = await graph.get_entities_by_type(entity_type, report_id)
     else:
@@ -199,3 +202,23 @@ async def get_report_targets(report_id: str):
         })
 
     return {"targets": results, "count": len(results)}
+
+@router.get("/{report_id}/stats")
+async def get_report_stats(report_id: str):
+    """Get dashboard aggregated stats for a report."""
+    graph = get_graph_backend()
+    if type(graph).__name__ == "Neo4jBackend":
+        stats = await graph.get_dashboard_stats(report_id)
+        if stats:
+            return stats
+    
+    # Fallback mock data if Neo4j is not connected or no data
+    return {
+        "emissionsScopeData": [
+            { "name": 'Global Ops', "scope1": 120, "scope2": 80, "scope3": 250 },
+        ],
+        "yoyTrendData": [
+            { "year": 'FY2022', "emissions": 2450, "energy": 1200 },
+        ],
+        "targetActual": { "target": -50, "actual": -15, "baseYear": '2020', "targetYear": '2030' }
+    }

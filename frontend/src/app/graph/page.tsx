@@ -89,6 +89,23 @@ function GraphContent() {
   const formattedGraph = useMemo(() => {
     if (!graphData) return { nodes: [], links: [] };
     
+    // Native Neo4j D3 Format Bypass
+    if (graphData.nodes && graphData.nodes.length > 0) {
+      const visibleNodes = graphData.nodes.filter((n: any) => !hiddenTypes.has(n.label || n.type || (n.properties && n.properties.type)));
+      const visibleIds = new Set(visibleNodes.map((n: any) => n.id));
+      const mappedNodes = visibleNodes.map((n: any) => {
+        const type = n.label || n.type || (n.properties && n.properties.type);
+        return {
+          ...n,
+          ...n.properties,
+          type: type,
+          val: nodeSize(type)
+        };
+      });
+      const mappedLinks = (graphData.links || []).filter((l: any) => visibleIds.has(l.source) && visibleIds.has(l.target));
+      return { nodes: mappedNodes, links: mappedLinks };
+    }
+    
     const visibleEntities = graphData.entities.filter(e => !hiddenTypes.has(e.type));
     const visibleIds = new Set(visibleEntities.map(e => e.id));
 
@@ -216,18 +233,33 @@ function GraphContent() {
 
     const connectedNodes = Array.from(connectedNodesMap.values());
 
-    // Fix 50+ Pages Bug: Only get Pages directly linked to this entity in raw graph relations
-    // Since Page nodes might be hidden from formattedGraph, we check raw graphData.relations
-    const rawPageEdges = graphData?.relations.filter((r: any) => 
-      (r.source_id === selectedEntity.id && graphData.entities.find(e => e.id === r.target_id)?.type === 'Page') ||
-      (r.target_id === selectedEntity.id && graphData.entities.find(e => e.id === r.source_id)?.type === 'Page')
-    ) || [];
-
-    const sourcePages = Array.from(new Set(rawPageEdges.map((r: any) => {
-      const pageId = r.source_id === selectedEntity.id ? r.target_id : r.source_id;
-      const pageEntity = graphData?.entities.find(e => e.id === pageId);
-      return pageEntity?.page_numbers?.[0] ?? (parseInt(pageId.replace(/\D/g, '')) || 0);
-    })));
+    // Fix 50+ Pages Bug: Only get Pages directly linked to this entity, or from its own page_numbers property
+    let sourcePages: number[] = [];
+    if (selectedEntity.properties?.page_numbers) {
+      sourcePages = Array.isArray(selectedEntity.properties.page_numbers) ? selectedEntity.properties.page_numbers : [selectedEntity.properties.page_numbers];
+    } else if (selectedEntity.page_numbers) {
+       sourcePages = Array.isArray(selectedEntity.page_numbers) ? selectedEntity.page_numbers : [selectedEntity.page_numbers];
+    } else {
+       // Search in D3 links
+       const pageEdges = formattedGraph.links.filter((link: any) => {
+         const targetNode = typeof link.target === 'object' ? link.target : formattedGraph.nodes.find((n: any) => n.id === link.target);
+         const sourceNode = typeof link.source === 'object' ? link.source : formattedGraph.nodes.find((n: any) => n.id === link.source);
+         if (!targetNode || !sourceNode) return false;
+         
+         const isTargetPage = targetNode.type === 'Page' || targetNode.label === 'Page';
+         const isSourcePage = sourceNode.type === 'Page' || sourceNode.label === 'Page';
+         
+         return (sourceNode.id === selectedEntity.id && isTargetPage) || (targetNode.id === selectedEntity.id && isSourcePage);
+       });
+       pageEdges.forEach((link: any) => {
+          const targetNode = typeof link.target === 'object' ? link.target : formattedGraph.nodes.find((n: any) => n.id === link.target);
+          const sourceNode = typeof link.source === 'object' ? link.source : formattedGraph.nodes.find((n: any) => n.id === link.source);
+          const pNode = sourceNode.id === selectedEntity.id ? targetNode : sourceNode;
+          const pNum = pNode.properties?.pageNumber || pNode.pageNumber || parseInt((pNode.id || '').replace(/\D/g, '')) || 0;
+          if (pNum) sourcePages.push(pNum);
+       });
+    }
+    sourcePages = Array.from(new Set(sourcePages)).sort((a,b) => a-b);
 
     return { connectedNodes, sourcePages };
   }, [selectedEntity, formattedGraph]);
@@ -388,7 +420,7 @@ function GraphContent() {
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Evidence / Extracted Context</div>
               <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 13, border: '1px solid var(--border-subtle)', fontStyle: 'italic', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                {evidence?.chunk_text || '[Extracted text chunk or table snippet justifying this entity will appear here.]'}
+                {selectedEntity.properties?.evidence_text || selectedEntity.properties?.context || evidence?.chunk_text || 'No context available'}
               </div>
             </div>
 
