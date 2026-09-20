@@ -286,27 +286,7 @@ function EvidenceContent() {
                           (e.target as HTMLImageElement).style.display = 'none';
                         }}
                       />
-                      {/* Visual Grounding Overlay */}
-                      <div
-                        style={{
-                          position: 'absolute',
-                          left: `${10 + (Math.abs(selectedEntity.id.charCodeAt(0)) % 10)}%`, // Deterministic mock left
-                          top: `${15 + (Math.abs(selectedEntity.id.charCodeAt(1) || 0) % 60)}%`, // Deterministic mock top
-                          width: `${40 + (Math.abs(selectedEntity.id.charCodeAt(2) || 0) % 40)}%`, // Deterministic mock width
-                          height: `${10 + (Math.abs(selectedEntity.id.charCodeAt(3) || 0) % 20)}%`, // Deterministic mock height
-                          border: '2px solid var(--accent-emerald)',
-                          backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                          pointerEvents: 'none',
-                          boxShadow: '0 0 0 4px rgba(16, 185, 129, 0.1)',
-                          borderRadius: '2px',
-                          display: 'flex',
-                          alignItems: 'flex-end',
-                          justifyContent: 'flex-end',
-                          padding: '2px'
-                        }}
-                      >
-                        <span style={{ background: 'var(--accent-emerald)', color: '#fff', fontSize: 9, fontWeight: 700, padding: '1px 4px', borderRadius: '2px' }}>EXTRACTED</span>
-                      </div>
+                      {/* Bounding box tracking is not implemented in the extraction pipeline yet, so we don't show a mock highlight box here. */}
                     </div>
                   </div>
                 </div>
