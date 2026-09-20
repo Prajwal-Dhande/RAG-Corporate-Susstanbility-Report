@@ -154,9 +154,11 @@ async def get_report_kpis(report_id: str):
 
     results = []
     for kpi in kpis:
-        # Get values from neighbors
-        neighbors = await graph.get_entity_neighbors(kpi.id, max_depth=1)
+        # Get values from neighbors up to depth 2 to include Pages
+        neighbors = await graph.get_entity_neighbors(kpi.id, max_depth=2)
         values = []
+        confs = []
+        pages = []
         for n in neighbors.get("entities", []):
             ntype = n.type if isinstance(n.type, str) else n.type.value
             if ntype in (EntityType.KPI_VALUE.value, EntityType.ACTUAL_VALUE.value):
@@ -165,13 +167,25 @@ async def get_report_kpis(report_id: str):
                     "confidence": n.confidence,
                     "page_numbers": n.page_numbers,
                 })
+                if n.confidence:
+                    confs.append(n.confidence)
+            elif ntype == EntityType.PAGE.value:
+                if n.page_numbers:
+                    pages.extend(n.page_numbers)
+                    
+        avg_conf = sum(confs) / len(confs) if confs else kpi.confidence
+        all_pages = list(set(pages)) or kpi.page_numbers
+        
+        description = kpi.description
+        if not description and kpi.properties.get("category"):
+            description = f"Category: {kpi.properties.get('category')}"
 
         results.append({
             "id": kpi.id,
             "name": kpi.name,
-            "description": kpi.description,
-            "confidence": kpi.confidence,
-            "page_numbers": kpi.page_numbers,
+            "description": description,
+            "confidence": avg_conf,
+            "page_numbers": all_pages,
             "values": values,
         })
 
