@@ -378,17 +378,17 @@ function GraphContent() {
               </button>
             </div>
 
-            {selectedEntity.description && (
+            {(evidence?.description || selectedEntity.description) && (
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.55 }}>
-                {selectedEntity.description}
+                {evidence?.description || selectedEntity.description}
               </p>
             )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
               <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 8 }}>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>Confidence</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: (selectedEntity.confidence || 0) >= 0.7 ? '#10b981' : '#f59e0b' }}>
-                  {Math.round((selectedEntity.confidence || 0) * 100)}%
+                <div style={{ fontSize: 14, fontWeight: 700, color: (evidence?.confidence ?? selectedEntity.confidence ?? 0) >= 0.7 ? '#10b981' : '#f59e0b' }}>
+                  {Math.round((evidence?.confidence ?? selectedEntity.confidence ?? 0) * 100)}%
                 </div>
               </div>
               <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 8 }}>
