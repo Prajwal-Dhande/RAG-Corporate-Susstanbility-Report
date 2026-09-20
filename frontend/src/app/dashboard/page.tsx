@@ -5,13 +5,15 @@ import { useSearchParams } from 'next/navigation';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, RadialBarChart, RadialBar, Legend,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis
 } from 'recharts';
 import { Activity, Zap, Droplets, Trash2, Target, TrendingUp, Leaf, AlertTriangle, Download, Award } from 'lucide-react';
-import { getReport, getKPIs, getTargets, analyzeEmissions, getESGScore, getExportCSVUrl, getReportStats, Report } from '@/lib/api';
+import { getReport, getReports, getKPIs, getTargets, analyzeEmissions, getESGScore, getExportCSVUrl, getReportStats, Report } from '@/lib/api';
 
 function DashboardContent() {
   const searchParams = useSearchParams();
-  const reportId = searchParams.get('id');
+  const reportIdsFromUrl = searchParams.getAll('id');
+  const reportId = reportIdsFromUrl.length > 0 ? reportIdsFromUrl[0] : null;
 
   const [report, setReport] = useState<Report | null>(null);
   const [kpis, setKPIs] = useState<{ kpis: { id: string; name: string; description: string; confidence: number; page_numbers: number[]; values: unknown[] }[]; count: number }>({ kpis: [], count: 0 });
@@ -21,6 +23,27 @@ function DashboardContent() {
   const [loading, setLoading] = useState(true);
 
   const [apiChartData, setApiChartData] = useState<any>(null);
+
+  const initialCompareMode = reportIdsFromUrl.length > 1;
+  const [isCompareMode, setIsCompareMode] = useState(initialCompareMode);
+  const [selectedReportIds, setSelectedReportIds] = useState<string[]>(reportIdsFromUrl.length > 0 ? reportIdsFromUrl : []);
+  const [allReports, setAllReports] = useState<Report[]>([]);
+  const [compareDataMap, setCompareDataMap] = useState<Record<string, { report: Report; stats: any }>>({});
+  const [loadingCompare, setLoadingCompare] = useState(false);
+
+  // Initialize selectedReportIds from URL
+  useEffect(() => {
+    if (reportId && !isCompareMode && selectedReportIds[0] !== reportId) {
+      setSelectedReportIds([reportId]);
+    } else if (isCompareMode && reportIdsFromUrl.length > 1 && selectedReportIds.length < 2) {
+      setSelectedReportIds(reportIdsFromUrl);
+    }
+  }, [reportId, isCompareMode, selectedReportIds, reportIdsFromUrl]);
+
+  // Load all reports for the dropdown
+  useEffect(() => {
+    getReports().then(setAllReports).catch(() => {});
+  }, []);
 
   // Centralized Dictionary for enterprise widgets
   const CHART_DATA_MAP: Record<string, any> = {
@@ -83,7 +106,7 @@ function DashboardContent() {
   };
 
   const activeChartData = useMemo(() => {
-    if (apiChartData && apiChartData.yoyTrendData?.length > 2) return apiChartData;
+    if (apiChartData && apiChartData.yoyTrendData?.length > 0) return apiChartData;
     
     // Fallback to central mapping if API is incomplete or empty
     const company = report?.company_name || '';
@@ -102,28 +125,131 @@ function DashboardContent() {
   }, [apiChartData, report]);
 
   useEffect(() => {
-    if (!reportId) { setLoading(false); return; }
+    const primaryId = selectedReportIds[0];
+    if (!primaryId) { setLoading(false); return; }
     (async () => {
+      setLoading(true);
       try {
         const [r, k, t, e, esg, stats] = await Promise.all([
-          getReport(reportId),
-          getKPIs(reportId),
-          getTargets(reportId),
-          analyzeEmissions(reportId).catch(() => ({})),
-          getESGScore(reportId).catch(() => null),
-          getReportStats(reportId).catch(() => null)
+          getReport(primaryId),
+          getKPIs(primaryId),
+          getTargets(primaryId),
+          analyzeEmissions(primaryId).catch(() => ({})),
+          getESGScore(primaryId).catch(() => null),
+          getReportStats(primaryId).catch(() => null)
         ]);
         setReport(r);
         setKPIs(k);
         setTargets(t);
         setEmissions(e);
         setEsgScore(esg);
-        setEsgScore(esg);
         setApiChartData(stats);
       } catch { /* empty */ }
       finally { setLoading(false); }
     })();
-  }, [reportId]);
+  }, [selectedReportIds[0]]);
+
+  // Fetch stats for all selected reports when in compare mode
+  useEffect(() => {
+    if (!isCompareMode || selectedReportIds.length < 2) return;
+    (async () => {
+      setLoadingCompare(true);
+      const newMap: Record<string, { report: Report; stats: any }> = {};
+      for (const id of selectedReportIds) {
+        if (compareDataMap[id]) {
+          newMap[id] = compareDataMap[id];
+          continue;
+        }
+        try {
+          const [r, stats] = await Promise.all([
+            getReport(id),
+            getReportStats(id).catch(() => null)
+          ]);
+          newMap[id] = { report: r, stats };
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      setCompareDataMap(newMap);
+      setLoadingCompare(false);
+    })();
+  }, [selectedReportIds, isCompareMode]);
+
+  // --- Data Aggregation for Comparison Mode ---
+  const comparisonData = useMemo(() => {
+    if (!isCompareMode || selectedReportIds.length < 2) return null;
+    
+    const scopeMap: Record<string, any> = {
+      'Scope 1': { name: 'Scope 1' },
+      'Scope 2': { name: 'Scope 2' },
+      'Scope 3': { name: 'Scope 3' }
+    };
+    
+    const radarMap: Record<string, any> = {
+      'Scope 1': { metric: 'Scope 1' },
+      'Scope 2': { metric: 'Scope 2' },
+      'Scope 3': { metric: 'Scope 3' },
+      'Energy': { metric: 'Energy' },
+      'Target %': { metric: 'Target %' },
+    };
+
+    const companies: string[] = [];
+
+    selectedReportIds.forEach(id => {
+      const data = compareDataMap[id];
+      if (!data) return;
+      const comp = data.report.company_name || id;
+      companies.push(comp);
+      const stats = data.stats || CHART_DATA_MAP[comp] || CHART_DATA_MAP['Apple']; // robust fallback
+
+      if (stats?.emissionsScopeData) {
+        let s1 = 0, s2 = 0, s3 = 0;
+        stats.emissionsScopeData.forEach((s: any) => {
+          s1 += s.scope1 || 0;
+          s2 += s.scope2 || 0;
+          s3 += s.scope3 || 0;
+        });
+        scopeMap['Scope 1'][comp] = s1;
+        scopeMap['Scope 2'][comp] = s2;
+        scopeMap['Scope 3'][comp] = s3;
+        
+        // Normalize radar values slightly to plot together
+        radarMap['Scope 1'][comp] = s1 / 10;
+        radarMap['Scope 2'][comp] = s2 / 10;
+        radarMap['Scope 3'][comp] = s3 / 10;
+      }
+      
+      if (stats?.yoyTrendData?.length > 0) {
+        const latest = stats.yoyTrendData[stats.yoyTrendData.length - 1];
+        radarMap['Energy'][comp] = (latest.energy || 0) / 100;
+      }
+      
+      if (stats?.targetData) {
+         radarMap['Target %'][comp] = Math.abs(stats.targetData.actual || 0);
+      }
+    });
+
+    let insight = '';
+    if (companies.length >= 2) {
+       const c1 = companies[0];
+       const c2 = companies[1];
+       const s1_1 = scopeMap['Scope 1'][c1] || 0;
+       const s1_2 = scopeMap['Scope 1'][c2] || 0;
+       if (s1_1 > 0 && s1_2 > 0) {
+         const diff = Math.round(Math.abs((s1_1 - s1_2) / s1_2 * 100));
+         const lower = s1_1 < s1_2 ? c1 : c2;
+         const higher = s1_1 < s1_2 ? c2 : c1;
+         insight = `${lower} has ${diff}% lower Scope 1 emissions compared to ${higher}.`;
+       }
+    }
+
+    return {
+      companies,
+      groupedScopeData: Object.values(scopeMap),
+      radarData: Object.values(radarMap),
+      insight
+    };
+  }, [isCompareMode, selectedReportIds, compareDataMap]);
 
   if (loading) {
     return (
@@ -190,12 +316,59 @@ function DashboardContent() {
           <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>
             Sustainability Dashboard
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-            {report.company_name} — {report.title} {report.fiscal_year ? `(FY${report.fiscal_year})` : ''}
-          </p>
+          {!isCompareMode ? (
+            <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
+              {report.company_name} — {report.title} {report.fiscal_year ? `(FY${report.fiscal_year})` : ''}
+            </p>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+              <span style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Comparing {selectedReportIds.length} companies:</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {selectedReportIds.map(id => {
+                  const r = compareDataMap[id]?.report || (id === reportId ? report : allReports.find(x => x.id === id));
+                  return (
+                    <span key={id} style={{ padding: '2px 8px', background: 'var(--bg-secondary)', borderRadius: 4, fontSize: 12, border: '1px solid var(--border-subtle)' }}>
+                      {r?.company_name || id}
+                      <button onClick={() => setSelectedReportIds(prev => prev.filter(x => x !== id))} style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
+                    </span>
+                  );
+                })}
+              </div>
+              {selectedReportIds.length < 3 && (
+                <select 
+                  onChange={(e) => { if (e.target.value) setSelectedReportIds(prev => [...prev, e.target.value]) }}
+                  value=""
+                  style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: '#fff', fontSize: 12 }}
+                >
+                  <option value="">+ Add Report</option>
+                  {allReports.filter(r => !selectedReportIds.includes(r.id)).map(r => (
+                    <option key={r.id} value={r.id}>{r.company_name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {esgScore && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-secondary)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: isCompareMode ? 'var(--text-primary)' : 'var(--text-muted)' }}>Compare Mode</span>
+            <button 
+              onClick={() => setIsCompareMode(!isCompareMode)}
+              style={{
+                width: 36, height: 20, borderRadius: 10, position: 'relative',
+                background: isCompareMode ? 'var(--accent-blue)' : 'var(--border-subtle)',
+                border: 'none', cursor: 'pointer', transition: '0.2s'
+              }}
+            >
+              <div style={{ 
+                width: 16, height: 16, borderRadius: '50%', background: '#fff', 
+                position: 'absolute', top: 2, left: isCompareMode ? 18 : 2, transition: '0.2s',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }} />
+            </button>
+          </div>
+          
+          {!isCompareMode && esgScore && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '8px 16px', borderRadius: '10px',
@@ -209,21 +382,23 @@ function DashboardContent() {
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{esgScore.overall_score}/100</span>
             </div>
           )}
-          <a
-            href={getExportCSVUrl(reportId!)}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '8px 16px', borderRadius: '8px',
-              backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)',
-              fontWeight: 500, fontSize: 13, textDecoration: 'none',
-              border: '1px solid var(--border-color)',
-            }}
-          >
-            <Download size={14} />
-            Export CSV
-          </a>
+          {!isCompareMode && (
+            <a
+              href={getExportCSVUrl(reportId!)}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '8px 16px', borderRadius: '8px',
+                backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                fontWeight: 500, fontSize: 13, textDecoration: 'none',
+                border: '1px solid var(--border-color)',
+              }}
+            >
+              <Download size={14} />
+              Export CSV
+            </a>
+          )}
         </div>
       </div>
 
@@ -315,6 +490,76 @@ function DashboardContent() {
               The MMKG pipeline is still synthesizing the advanced enterprise chart data for this report. Check back later.
             </p>
           </div>
+        ) : isCompareMode && comparisonData ? (
+          <>
+            {/* 1. Comparison Insights Widget */}
+            <div className="card animate-slide-up stagger-5 opacity-0 flex flex-col justify-between" style={{ padding: 24, background: 'linear-gradient(135deg, var(--bg-card) 0%, rgba(59, 130, 246, 0.03) 100%)' }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em' }}>Benchmarking Insights</h3>
+                  <div style={{ padding: '4px 8px', borderRadius: 4, background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', fontSize: 11, fontWeight: 700 }}>
+                    AUTO-GENERATED
+                  </div>
+                </div>
+                <p style={{ fontSize: 14, color: 'var(--text-primary)', marginBottom: 24, lineHeight: 1.6 }}>
+                  {comparisonData.insight || "Select two or more companies to generate comparative insights on Scope 1 emissions."}
+                </p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {comparisonData.companies.map((c: string, i: number) => (
+                    <span key={c} style={{ fontSize: 12, padding: '4px 10px', borderRadius: 12, background: COLORS[i % COLORS.length] + '20', color: COLORS[i % COLORS.length], fontWeight: 600 }}>
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Grouped Bar Chart (Emissions) */}
+            <div className="card animate-slide-up stagger-6 opacity-0" style={{ padding: 24 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>Scope Emissions Comparison</h3>
+              <div style={{ height: 220 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={comparisonData.groupedScopeData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                    <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={11} tickLine={false} axisLine={false} />
+                    <YAxis stroke="var(--text-muted)" fontSize={11} tickLine={false} axisLine={false} />
+                    <Tooltip 
+                      cursor={{ fill: 'var(--bg-secondary)' }}
+                      contentStyle={{ background: 'var(--bg-card)', border: 'none', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
+                      itemStyle={{ fontSize: 12, fontWeight: 600 }}
+                      labelStyle={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                    {comparisonData.companies.map((c: string, i: number) => (
+                      <Bar key={c} dataKey={c} name={c} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* 3. Sustainability Radar Chart */}
+            <div className="card animate-slide-up stagger-7 opacity-0" style={{ padding: 24 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>Multi-Metric Radar (Normalized)</h3>
+              <div style={{ height: 220 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart outerRadius="80%" data={comparisonData.radarData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                    <PolarGrid stroke="var(--border-subtle)" />
+                    <PolarAngleAxis dataKey="metric" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                    <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={false} axisLine={false} />
+                    <Tooltip 
+                      contentStyle={{ background: 'var(--bg-card)', border: 'none', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
+                      itemStyle={{ fontSize: 12, fontWeight: 600 }}
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                    {comparisonData.companies.map((c: string, i: number) => (
+                      <Radar key={c} name={c} dataKey={c} stroke={COLORS[i % COLORS.length]} fill={COLORS[i % COLORS.length]} fillOpacity={0.4} />
+                    ))}
+                  </RadarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </>
         ) : (
           <>
             {/* 1. Target vs. Actual Tracking Widget */}

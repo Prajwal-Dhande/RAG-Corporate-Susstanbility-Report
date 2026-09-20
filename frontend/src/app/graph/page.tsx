@@ -270,9 +270,9 @@ function GraphContent() {
     return String(val);
   }
 
-  if (loading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}><div className="spinner" style={{ width: 32, height: 32 }} /></div>;
-  }
+  // if (loading) {
+  //   return <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}><div className="spinner" style={{ width: 32, height: 32 }} /></div>;
+  // }
 
   if (!reportId || !report) {
     return (
@@ -322,7 +322,12 @@ function GraphContent() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: selectedEntity ? '1fr 360px' : '1fr', gap: 16, flex: 1, minHeight: 0 }}>
-        <div className="graph-container kg-canvas" style={{ background: '#f8fafc', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
+        <div className="graph-container kg-canvas" style={{ background: '#f8fafc', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-subtle)', position: 'relative' }}>
+          {loading ? (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(248, 250, 252, 0.8)', zIndex: 10 }}>
+              <div className="spinner" style={{ width: 40, height: 40 }} />
+            </div>
+          ) : null}
           <ForceGraph2D
             ref={graphRef}
             graphData={formattedGraph}
@@ -339,7 +344,8 @@ function GraphContent() {
             onNodeClick={handleNodeClick}
             nodeCanvasObjectMode={() => "after"}
             nodeCanvasObject={(node: any, ctx, globalScale) => {
-              const label = node.name.length > 20 ? node.name.slice(0, 17) + '...' : node.name;
+              const nodeName = node.name || 'Unknown';
+              const label = nodeName.length > 20 ? nodeName.slice(0, 17) + '...' : nodeName;
               const fontSize = 12/globalScale;
               
               // Only render labels when zoomed in or selected
@@ -420,7 +426,7 @@ function GraphContent() {
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Evidence / Extracted Context</div>
               <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 13, border: '1px solid var(--border-subtle)', fontStyle: 'italic', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                {selectedEntity.properties?.evidence_text || selectedEntity.properties?.context || evidence?.chunk_text || 'No context available'}
+                {selectedEntity.properties?.evidence_text || selectedEntity.properties?.context || evidence?.chunk_text || 'No exact evidence extracted'}
               </div>
             </div>
 
@@ -454,7 +460,7 @@ function GraphContent() {
                         <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.entity.name}</span>
                       </span>
                       <span style={{ color: 'var(--text-muted)', fontSize: 10, flexShrink: 0 }}>
-                        {item.relation.relation.replace(/_/g, ' ')}
+                        {(item.relation.relation || 'RELATED_TO').replace(/_/g, ' ')}
                       </span>
                     </button>
                   ))}

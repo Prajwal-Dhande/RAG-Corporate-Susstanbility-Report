@@ -16,6 +16,10 @@ export default function ReportsPage() {
   const [companyName, setCompanyName] = useState('');
   const [fiscalYear, setFiscalYear] = useState('');
   const [error, setError] = useState('');
+  
+  const [isCompareMode, setIsCompareMode] = useState(false);
+  const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
+
   const router = useRouter();
 
   const fetchReports = useCallback(async () => {
@@ -45,7 +49,7 @@ export default function ReportsPage() {
     setError('');
     setUploading(true);
     try {
-      await uploadReport(
+      const res = await uploadReport(
         file,
         companyName.trim(),
         fiscalYear ? parseInt(fiscalYear) : undefined
@@ -53,6 +57,8 @@ export default function ReportsPage() {
       setCompanyName('');
       setFiscalYear('');
       await fetchReports();
+      // Navigate to Dashboard to view the newly uploaded report
+      router.push(`/dashboard?id=${res.id}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Upload failed');
     } finally { setUploading(false); }
@@ -177,8 +183,36 @@ export default function ReportsPage() {
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
             <FileText size={18} /> Processed Reports
+            <span className="badge badge-neutral" style={{ marginLeft: 8 }}>{reports.length} reports</span>
           </h2>
-          <span className="badge badge-neutral">{reports.length} reports</span>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <input 
+                type="checkbox" 
+                checked={isCompareMode} 
+                onChange={(e) => { 
+                  setIsCompareMode(e.target.checked); 
+                  if (!e.target.checked) setSelectedForCompare([]); 
+                }} 
+              />
+              Compare Mode
+            </label>
+            {isCompareMode && selectedForCompare.length >= 2 && (
+              <button 
+                onClick={() => {
+                  const query = selectedForCompare.map(id => `id=${id}`).join('&');
+                  router.push(`/dashboard?${query}`);
+                }}
+                style={{
+                  background: 'var(--accent-blue)', color: '#fff', border: 'none', borderRadius: 6,
+                  padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer'
+                }}
+              >
+                Compare {selectedForCompare.length} Reports
+              </button>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -195,6 +229,7 @@ export default function ReportsPage() {
             <table className="data-table" style={{ width: '100%', minWidth: 900 }}>
               <thead>
               <tr>
+                {isCompareMode && <th style={{ width: 40, paddingLeft: 20 }}></th>}
                 <th>Report</th>
                 <th>Company</th>
                 <th>Year</th>
@@ -210,11 +245,36 @@ export default function ReportsPage() {
               {reports.map(report => (
                 <tr
                   key={report.id}
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', background: selectedForCompare.includes(report.id) ? '#f0f9ff' : 'transparent' }}
                   onClick={() => {
-                    if (report.status === 'completed') router.push(`/dashboard?id=${report.id}`);
+                    if (isCompareMode && report.status === 'completed') {
+                      setSelectedForCompare(prev => {
+                        if (prev.includes(report.id)) return prev.filter(x => x !== report.id);
+                        if (prev.length >= 3) return prev;
+                        return [...prev, report.id];
+                      });
+                    } else {
+                      if (report.status === 'completed') router.push(`/dashboard?id=${report.id}`);
+                    }
                   }}
                 >
+                  {isCompareMode && (
+                    <td style={{ paddingLeft: 20 }} onClick={(e) => e.stopPropagation()}>
+                      <input 
+                        type="checkbox" 
+                        disabled={report.status !== 'completed'}
+                        checked={selectedForCompare.includes(report.id)} 
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setSelectedForCompare(prev => {
+                              if (!checked) return prev.filter(x => x !== report.id);
+                              if (prev.length >= 3) return prev;
+                              return [...prev, report.id];
+                          });
+                        }} 
+                      />
+                    </td>
+                  )}
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <FileText size={16} style={{ color: 'var(--accent-blue)' }} />

@@ -109,7 +109,7 @@ class ESGScorer:
         # Get all entities
         all_entities = []
         for etype in [EntityType.KPI.value, EntityType.TARGET.value,
-                      EntityType.ORGANIZATION.value, EntityType.METRIC.value]:
+                      EntityType.COMPANY.value]:
             entities = await self.graph.get_entities_by_type(etype, report_id)
             all_entities.extend(entities)
 

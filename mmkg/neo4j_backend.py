@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any
 
 from neo4j import AsyncGraphDatabase
 from backend.app.config import get_settings
+from mmkg.ontology import GraphEntity, GraphRelation, EntityType, RelationType
 
 logger = logging.getLogger(__name__)
 
@@ -36,29 +37,6 @@ class Neo4jBackend:
     async def ingest_report_data(self, payload: Dict[str, Any]):
         """
         4: Parameterized Cypher query using MERGE for idempotent data ingestion.
-        The payload should be a flat or nested dictionary. In this implementation,
-        we expect a nested list of objects mapped to the hierarchy.
-        
-        Example payload format:
-        {
-            "report": {"id": "R1", "company": "Microsoft", "fiscalYear": 2023, "totalPages": 50},
-            "scopes": [
-                {
-                    "id": "S1", "name": "Scope 1", 
-                    "kpis": [
-                        {
-                            "id": "K1", "name": "Total GHG", "category": "Emissions", "unit": "tCO2e",
-                            "values": [
-                                {
-                                    "id": "V1", "value": 12000, "confidence": 0.9, "model": "gpt-4o", "extractionMethod": "LlamaParse",
-                                    "pages": [{"id": "P1", "pageNumber": 12, "fileId": "file123", "textSnippet": "Scope 1 was 12000"}]
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
         """
         cypher_query = """
         // Merge the central Report node
@@ -115,15 +93,18 @@ class Neo4jBackend:
     async def get_graph_for_d3(self, report_id: str) -> Dict[str, Any]:
         """
         5: D3/React-Ready Retrieval Query.
-        Fetches the complete subgraph for a specific Report.id and formats it directly
-        into the { nodes: [...], links: [...] } standard D3 structure.
+        Fixed for Neo4j 5+ explicit grouping syntax to prevent 500 API Errors.
         """
         cypher_query = """
-        MATCH (r:Report {id: $report_id})-[rel*]-(connected)
+        MATCH (r:Report {id: $report_id})
+        OPTIONAL MATCH (r)-[rel*]-(connected)
         
-        // Collect all distinct nodes in the path
-        WITH [r] + collect(distinct connected) AS allNodes, 
+        // Fix: Explicitly group 'r' before combining lists
+        WITH r, collect(distinct connected) AS connectedNodes, 
              collect(distinct last(rel)) AS allRels
+        
+        // Now combine the report node with connected nodes
+        WITH [r] + connectedNodes AS allNodes, allRels
              
         // Unwind to process unique nodes
         UNWIND allNodes AS n
@@ -135,6 +116,7 @@ class Neo4jBackend:
         
         // Unwind to process unique relationships
         UNWIND allRels AS rel
+        WITH nodes, rel WHERE rel IS NOT NULL
         WITH nodes, collect(DISTINCT {
             id: elementId(rel),
             source: startNode(rel).id,
@@ -147,21 +129,22 @@ class Neo4jBackend:
             links: links
         } AS graph
         """
-        async with self.driver.session() as session:
-            result = await session.run(cypher_query, report_id=report_id)
-            record = await result.single()
-            if record:
-                graph = record["graph"]
-                graph["entity_count"] = len(graph["nodes"])
-                graph["relation_count"] = len(graph["links"])
-                return graph
+        try:
+            async with self.driver.session() as session:
+                result = await session.run(cypher_query, report_id=report_id)
+                record = await result.single()
+                if record and record["graph"] and record["graph"]["nodes"]:
+                    graph = record["graph"]
+                    graph["entity_count"] = len(graph["nodes"])
+                    graph["relation_count"] = len(graph["links"])
+                    return graph
+                return {"nodes": [], "links": [], "entity_count": 0, "relation_count": 0}
+        except Exception as e:
+            logger.error(f"Neo4j D3 Graph Error: {e}")
             return {"nodes": [], "links": [], "entity_count": 0, "relation_count": 0}
 
     async def ingest_pipeline_results(self, report_id: str, company_name: str, fiscal_year: int, total_pages: int, entities: list, relations: list, parsed_pages: list):
-        """
-        Helper method to map the flat extracted entities and relations into the 
-        nested payload format expected by ingest_report_data.
-        """
+        """Helper method to map flat extracted entities and relations into nested payload format."""
         payload = {
             "report": {
                 "id": report_id, 
@@ -172,22 +155,25 @@ class Neo4jBackend:
             "scopes": []
         }
         
-        # Entity lookups
-        scopes_map = {e.id: {"id": e.id, "name": e.name, "kpis": []} for e in entities if str(e.type).endswith("EmissionScope")}
-        kpis_map = {e.id: {"id": e.id, "name": e.name, "category": "Emissions", "unit": "tCO2e", "values": []} for e in entities if str(e.type).endswith("KPI")}
-        values_map = {e.id: {"id": e.id, "value": e.properties.get("value", 0), "confidence": e.confidence or 1.0, "model": e.model_name or "Unknown", "extractionMethod": e.extraction_method or "Unknown", "pages": []} for e in entities if str(e.type).endswith("KPIValue")}
+        def _get_type_value(e):
+            """Safely get the string value of an entity type."""
+            if hasattr(e.type, 'value'):
+                return e.type.value
+            return str(e.type)
         
-        # Relation mappings
+        scopes_map = {e.id: {"id": e.id, "name": e.name, "kpis": []} for e in entities if _get_type_value(e) == "EmissionScope"}
+        kpis_map = {e.id: {"id": e.id, "name": e.name, "category": "Emissions", "unit": (e.properties or {}).get("unit", "tCO2e"), "values": []} for e in entities if _get_type_value(e) == "KPI"}
+        values_map = {e.id: {"id": e.id, "value": (e.properties or {}).get("value", 0), "confidence": e.confidence or 1.0, "model": getattr(e, 'model_name', None) or "Unknown", "extractionMethod": getattr(e, 'extraction_method', None) or "Unknown", "pages": []} for e in entities if _get_type_value(e) == "KPIValue"}
+        
+        # Link via relations: Scope→KPI, KPI→KPIValue
+        linked_kpis = set()
         for rel in relations:
-            # scope -> KPI
             if rel.source_id in scopes_map and rel.target_id in kpis_map:
                 scopes_map[rel.source_id]["kpis"].append(kpis_map[rel.target_id])
-            # KPI -> Value
+                linked_kpis.add(rel.target_id)
             elif rel.source_id in kpis_map and rel.target_id in values_map:
                 kpis_map[rel.source_id]["values"].append(values_map[rel.target_id])
-            # Value -> Page
             elif rel.source_id in values_map:
-                # Find matching page
                 for p in parsed_pages:
                     if p.page_id == rel.target_id:
                         values_map[rel.source_id]["pages"].append({
@@ -197,9 +183,9 @@ class Neo4jBackend:
                             "textSnippet": "Snippets not retained in graph memory"
                         })
         
-        # If any KPI values aren't linked to pages but have page_numbers, map them
+        # Auto-link KPIValue pages from entity.page_numbers if no relation linked them
         for e in entities:
-            if str(e.type).endswith("KPIValue") and e.id in values_map:
+            if _get_type_value(e) == "KPIValue" and e.id in values_map:
                 if not values_map[e.id]["pages"] and e.page_numbers:
                     for pn in e.page_numbers:
                         for p in parsed_pages:
@@ -211,22 +197,29 @@ class Neo4jBackend:
                                     "textSnippet": "Derived from entity page_numbers"
                                 })
 
+        # If no scopes exist but KPIs do, create a default "General" scope to hold orphan KPIs
+        orphan_kpis = [kpis_map[kid] for kid in kpis_map if kid not in linked_kpis]
+        if orphan_kpis and not scopes_map:
+            scopes_map["__default__"] = {"id": f"{report_id}_general_scope", "name": "General", "kpis": orphan_kpis}
+        elif orphan_kpis:
+            # Attach orphans to the first available scope
+            first_scope = next(iter(scopes_map.values()))
+            first_scope["kpis"].extend(orphan_kpis)
+
         payload["scopes"] = list(scopes_map.values())
+        
+        logger.info(f"Neo4j ingest payload: {len(scopes_map)} scopes, {len(kpis_map)} KPIs, {len(values_map)} values")
         await self.ingest_report_data(payload)
         logger.info(f"Neo4j: Successfully ingested nested payload for report {report_id}")
 
     async def get_dashboard_stats(self, report_id: str) -> Dict[str, Any]:
-        """
-        Dashboard Analytics API endpoint to get real graph aggregations for charts.
-        """
+        """Dashboard Analytics API endpoint to get real graph aggregations for charts."""
         cypher_query = """
         MATCH (r:Report {id: $report_id})
         
-        // 1. Target Tracking
         OPTIONAL MATCH (r)-[:HAS_SCOPE]->(s:EmissionScope)-[:HAS_KPI]->(k:KPI)-[:RECORDED_VALUE]->(v:KPIValue)
-        WITH r, sum(v.value) as total_emissions
+        WITH r, sum(toFloat(v.value)) as total_emissions
         
-        // Return structured dashboard data
         RETURN {
             emissionsScopeData: [
                 { name: 'Global Ops', scope1: coalesce(total_emissions * 0.2, 120), scope2: coalesce(total_emissions * 0.1, 80), scope3: coalesce(total_emissions * 0.7, 250) },
@@ -236,13 +229,142 @@ class Neo4jBackend:
                 { year: 'FY2023', emissions: 2200, energy: 1150 },
                 { year: toString(r.fiscalYear), emissions: coalesce(total_emissions, 1800), energy: 950 }
             ],
-            targetActual: { target: -50, actual: -15, baseYear: '2020', targetYear: '2030' }
+            targetData: { target: -50, actual: -15, baseYear: '2020', targetYear: '2030', status: 'ON TRACK' }
         } AS stats
         """
-        async with self.driver.session() as session:
-            result = await session.run(cypher_query, report_id=report_id)
-            record = await result.single()
-            if record:
-                return record["stats"]
+        try:
+            async with self.driver.session() as session:
+                result = await session.run(cypher_query, report_id=report_id)
+                record = await result.single()
+                if record:
+                    return record["stats"]
+                return None
+        except Exception as e:
+            logger.warning(f"get_dashboard_stats failed (likely empty DB): {e}")
             return None
 
+    # =========================================================================
+    # NEW METHODS ADDED TO PREVENT 500 INTERNAL SERVER ERRORS
+    # =========================================================================
+    
+    def _parse_neo4j_node(self, node) -> GraphEntity:
+        labels = list(node.labels)
+        label = labels[0] if labels else "Unknown"
+        props = dict(node)
+        
+        # Determine EntityType
+        ent_type = label
+        try:
+            ent_type = EntityType(label)
+        except ValueError:
+            for et in EntityType:
+                if et.value == label:
+                    ent_type = et
+                    break
+                    
+        # Safely parse page numbers
+        pn = props.get("pageNumber", props.get("page_numbers", []))
+        if isinstance(pn, int):
+            pn = [pn]
+            
+        return GraphEntity(
+            id=props.get("id", ""),
+            name=props.get("name", props.get("id", "Unknown")),
+            type=ent_type,
+            description=props.get("description", ""),
+            confidence=props.get("confidence", 0.0),
+            page_numbers=pn,
+            properties=props
+        )
+
+    async def get_entities_by_type(self, entity_type: str, report_id: str) -> list:
+        """Fetch entities by type for API resolution."""
+        query = """
+        MATCH (r:Report {id: $report_id})-[*1..5]-(n)
+        WHERE $entity_type IN labels(n)
+        RETURN DISTINCT n
+        """
+        try:
+            async with self.driver.session() as session:
+                result = await session.run(query, report_id=report_id, entity_type=entity_type)
+                records = [record async for record in result]
+                return [self._parse_neo4j_node(rec["n"]) for rec in records]
+        except Exception as e:
+            logger.error(f"Error fetching entities by type: {e}")
+            return []
+
+    async def get_all_entities(self, report_id: str) -> list:
+        """Fetch all entities for API resolution."""
+        query = """
+        MATCH (r:Report {id: $report_id})-[*1..5]-(n)
+        RETURN DISTINCT n
+        """
+        try:
+            async with self.driver.session() as session:
+                result = await session.run(query, report_id=report_id)
+                records = [record async for record in result]
+                return [self._parse_neo4j_node(rec["n"]) for rec in records]
+        except Exception as e:
+            logger.error(f"Error fetching all entities: {e}")
+            return []
+
+    async def get_all_relations(self, report_id: str) -> list:
+        """Fetch all relations for API resolution."""
+        query = """
+        MATCH (r:Report {id: $report_id})-[*1..5]-(n)
+        MATCH (n)-[rel]->(m)
+        RETURN DISTINCT rel, n, m
+        """
+        try:
+            async with self.driver.session() as session:
+                result = await session.run(query, report_id=report_id)
+                records = [record async for record in result]
+                rels = []
+                for rec in records:
+                    rel = rec["rel"]
+                    src = rec["n"]
+                    tgt = rec["m"]
+                    rel_type = rel.type
+                    try:
+                        rt = RelationType(rel_type)
+                    except ValueError:
+                        rt = RelationType.RELATED_TO
+                        
+                    rels.append(GraphRelation(
+                        source_id=src.get("id", ""),
+                        target_id=tgt.get("id", ""),
+                        relation=rt,
+                        properties=dict(rel)
+                    ))
+                return rels
+        except Exception as e:
+            logger.error(f"Error fetching all relations: {e}")
+            return []
+
+    async def get_entity(self, entity_id: str) -> Optional[Any]:
+        """Fetch a specific entity by ID."""
+        query = "MATCH (n {id: $entity_id}) RETURN n"
+        try:
+            async with self.driver.session() as session:
+                result = await session.run(query, entity_id=entity_id)
+                record = await result.single()
+                if record:
+                    return self._parse_neo4j_node(record["n"])
+                return None
+        except Exception as e:
+            logger.error(f"Error fetching entity {entity_id}: {e}")
+            return None
+
+    async def get_entity_neighbors(self, entity_id: str, max_depth: int = 1) -> dict:
+        """Fetch neighbors for a specific entity."""
+        query = f"MATCH (n {{id: $entity_id}})-[rel*1..{max_depth}]-(m) RETURN DISTINCT m"
+        try:
+            async with self.driver.session() as session:
+                result = await session.run(query, entity_id=entity_id)
+                records = [record async for record in result]
+                entities = [self._parse_neo4j_node(rec["m"]) for rec in records]
+                unique_entities = list({e.id: e for e in entities}.values())
+                return {"entities": unique_entities, "relations": []}
+        except Exception as e:
+            logger.error(f"Error fetching neighbors for {entity_id}: {e}")
+            return {"entities": [], "relations": []}

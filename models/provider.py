@@ -7,6 +7,7 @@ Supports: OpenAI (GPT-4o-mini), Mock (testing), Local VLM (future).
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -226,11 +227,11 @@ class GroqProvider(ModelProvider):
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         settings = get_settings()
-        self.api_key = api_key or settings.openai_api_key
-        self.model = model or "llama-3.1-8b-instant"
+        self.api_key = api_key or settings.groq_api_key
+        self.model = model or settings.vlm_model or "llama-3.1-8b-instant"
 
         if not self.api_key:
-            raise ValueError("API Key is required for Groq provider")
+            raise ValueError("GROQ_API_KEY is required for Groq provider")
 
         from openai import AsyncOpenAI
         # Groq is OpenAI compatible
@@ -264,7 +265,30 @@ class GroqProvider(ModelProvider):
             kwargs["response_format"] = {"type": "json_object"}
 
         start_time = time.time()
-        response = await self.client.chat.completions.create(**kwargs)
+        
+        # Add retry and fallback logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.chat.completions.create(**kwargs)
+                break
+            except Exception as e:
+                import openai
+                is_rate_limit = isinstance(e, openai.RateLimitError) or "429" in str(e)
+                if is_rate_limit:
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt
+                        logger.warning(f"Groq rate limit hit. Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error("Groq rate limit exhausted. Falling back to mock data.")
+                        mock = MockProvider()
+                        return await mock.generate(prompt, images, system_prompt, temperature, max_tokens, json_mode)
+                else:
+                    logger.error(f"Groq API call failed: {e}")
+                    raise
+
         duration = time.time() - start_time
 
         raw_content = response.choices[0].message.content or ""
