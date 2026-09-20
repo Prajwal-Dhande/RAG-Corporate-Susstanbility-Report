@@ -52,7 +52,9 @@ function EvidenceContent() {
       try {
         const ev = await getEvidence(reportId, entity.id);
         setEvidence(ev);
-        if (entity.page_numbers.length > 0) {
+        if (ev.provenance?.page_numbers?.length > 0) {
+          setSelectedPage(ev.provenance.page_numbers[0]);
+        } else if (entity.page_numbers.length > 0) {
           setSelectedPage(entity.page_numbers[0]);
         }
       } catch { setEvidence(null); }
