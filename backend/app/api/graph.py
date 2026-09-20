@@ -26,8 +26,9 @@ async def get_report_graph(
     """Get the knowledge graph for a report."""
     graph = get_graph_backend()
 
+    d3_graph = {}
     if type(graph).__name__ == "Neo4jBackend":
-        return await graph.get_graph_for_d3(report_id)
+        d3_graph = await graph.get_graph_for_d3(report_id)
 
     if entity_type:
         entities = await graph.get_entities_by_type(entity_type, report_id)
@@ -111,6 +112,8 @@ async def get_report_graph(
     return GraphResponse(
         entities=entity_responses,
         relations=unique_relations,
+        nodes=d3_graph.get("nodes", []),
+        links=d3_graph.get("links", []),
         entity_count=len(unique_entities),
         relation_count=len(unique_relations),
     )
