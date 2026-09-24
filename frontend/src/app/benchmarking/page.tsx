@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
-import { getReports, getBenchmarkData, Report } from '@/lib/api';
-import { BarChart2, AlertCircle, RefreshCw, Play, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { getReports, getBenchmarkData, uploadReport, Report } from '@/lib/api';
+import { BarChart2, AlertCircle, RefreshCw, Play, TrendingUp, TrendingDown, Upload, Loader2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useSearchParams } from 'next/navigation';
 
@@ -22,31 +22,63 @@ export default function BenchmarkingPage() {
   const [error, setError] = useState<string | null>(null);
   const [hasGenerated, setHasGenerated] = useState(false);
 
-  useEffect(() => {
-    loadReports();
-  }, []);
+  // Upload state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
-  async function loadReports() {
+  const fetchReports = useCallback(async () => {
     try {
       const data = await getReports();
-      const processed = data.filter(r => r.status === 'completed');
-      setReports(processed);
-      if (!baseReportId && processed.length > 0) {
-        setBaseReportId(processed[0].id);
+      setReports(data);
+      // Auto-set base report if none selected
+      if (!baseReportId) {
+        const completed = data.filter(r => r.status === 'completed');
+        if (completed.length > 0) setBaseReportId(completed[0].id);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load reports');
     }
-  }
+  }, [baseReportId]);
+
+  useEffect(() => {
+    fetchReports();
+  }, [fetchReports]);
+
+  // Poll if any report is processing
+  useEffect(() => {
+    const processing = reports.filter(r => !['completed', 'failed'].includes(r.status));
+    if (processing.length === 0) return;
+    const interval = setInterval(fetchReports, 3000);
+    return () => clearInterval(interval);
+  }, [reports, fetchReports]);
 
   const baseReport = reports.find(r => r.id === baseReportId);
   const compareReport = reports.find(r => r.id === compareReportId);
 
   // Filter available comparison reports to be the same company, different year
   const availableCompareReports = useMemo(() => {
-    if (!baseReport) return reports;
+    if (!baseReport) return [];
     return reports.filter(r => r.company_name === baseReport.company_name && r.id !== baseReport.id);
   }, [baseReport, reports]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !baseReport) return;
+    
+    const yearStr = prompt(`Enter Fiscal Year for this new report of ${baseReport.company_name}:`, "2024");
+    if (!yearStr) return;
+    
+    try {
+      setUploading(true);
+      await uploadReport(file, baseReport.company_name, parseInt(yearStr));
+      await fetchReports();
+    } catch (err: any) {
+      setError(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   async function handleGenerate() {
     if (!baseReportId || !compareReportId) return;
@@ -123,6 +155,9 @@ export default function BenchmarkingPage() {
     };
   }, [displayData, baseReport, compareReport, generatedData, hasGenerated, selectedKpi]);
 
+  // Only allow completed base reports
+  const completedReports = reports.filter(r => r.status === 'completed');
+
   return (
     <div className="page-container" style={{ maxWidth: '1400px' }}>
       <header className="page-header" style={{ marginBottom: '24px' }}>
@@ -160,7 +195,7 @@ export default function BenchmarkingPage() {
               style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
             >
               <option value="" disabled>Select Base Report...</option>
-              {reports.map(r => (
+              {completedReports.map(r => (
                 <option key={r.id} value={r.id}>
                   {r.company_name} - FY {r.fiscal_year}
                 </option>
@@ -168,9 +203,19 @@ export default function BenchmarkingPage() {
             </select>
           </div>
 
-          <div style={{ flex: 1, minWidth: '200px' }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>
-              Comparison Report (Year 2)
+          <div style={{ flex: 1, minWidth: '200px', display: 'flex', flexDirection: 'column' }}>
+            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>
+              <span>Comparison Report (Year 2)</span>
+              {baseReportId && (
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  style={{ background: 'none', border: 'none', color: 'var(--accent-blue)', fontSize: 12, cursor: uploading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                >
+                  {uploading ? <Loader2 size={12} className="spin"/> : <Upload size={12}/>}
+                  Upload New
+                </button>
+              )}
             </label>
             <select 
               value={compareReportId} 
@@ -185,11 +230,18 @@ export default function BenchmarkingPage() {
                 {availableCompareReports.length === 0 ? 'No other years available for this company' : 'Select Target Year...'}
               </option>
               {availableCompareReports.map(r => (
-                <option key={r.id} value={r.id}>
-                  {r.company_name} - FY {r.fiscal_year}
+                <option key={r.id} value={r.id} disabled={r.status !== 'completed'}>
+                  {r.company_name} - FY {r.fiscal_year} {r.status !== 'completed' ? `(Processing...)` : ''}
                 </option>
               ))}
             </select>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              style={{ display: 'none' }} 
+              accept="application/pdf" 
+              onChange={handleFileUpload} 
+            />
           </div>
 
           <div style={{ width: '180px' }}>
@@ -330,7 +382,7 @@ export default function BenchmarkingPage() {
               </h3>
               <p style={{ fontSize: 16, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
                 {targetSummary.text} 
-                {targetSummary.pct !== '0' && (
+                {targetSummary.pct !== '0.0' && targetSummary.pct !== '0' && (
                    <span style={{ 
                      display: 'inline-block', 
                      marginLeft: 10,
