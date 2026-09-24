@@ -333,7 +333,7 @@ export default function BenchmarkingPage() {
                     />
                     <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                        {displayData.baseChart.map((entry, index) => (
-                         <Cell key={`cell-${index}`} fill="var(--accent-purple)" />
+                         <Cell key={`cell-${index}`} fill="var(--accent-violet)" />
                        ))}
                     </Bar>
                   </BarChart>
@@ -363,7 +363,7 @@ export default function BenchmarkingPage() {
                     />
                     <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                        {displayData.compareChart.map((entry, index) => (
-                         <Cell key={`cell-${index}`} fill={targetSummary?.isGood ? "var(--accent-emerald)" : "var(--accent-red)"} />
+                         <Cell key={`cell-${index}`} fill={targetSummary?.isGood ? "var(--accent-emerald)" : "var(--status-error)"} />
                        ))}
                     </Bar>
                   </BarChart>
@@ -376,13 +376,13 @@ export default function BenchmarkingPage() {
 
       {/* TARGET SUMMARY SECTION */}
       {hasGenerated && targetSummary && (
-        <div className="card" style={{ borderLeft: `4px solid ${targetSummary.isGood ? 'var(--accent-emerald)' : 'var(--accent-red)'}` }}>
+        <div className="card" style={{ borderLeft: `4px solid ${targetSummary.isGood ? 'var(--accent-emerald)' : 'var(--status-error)'}` }}>
           <div className="card-content" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
             <div style={{ padding: '16px', borderRadius: '50%', backgroundColor: targetSummary.isGood ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)' }}>
                {targetSummary.isGood ? (
                   <TrendingDown size={32} style={{ color: 'var(--accent-emerald)' }} />
                ) : (
-                  <TrendingUp size={32} style={{ color: 'var(--accent-red)' }} />
+                  <TrendingUp size={32} style={{ color: 'var(--status-error)' }} />
                )}
             </div>
             <div>
@@ -400,7 +400,7 @@ export default function BenchmarkingPage() {
                      fontSize: 14,
                      fontWeight: 600,
                      backgroundColor: targetSummary.isGood ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                     color: targetSummary.isGood ? 'var(--accent-emerald)' : 'var(--accent-red)'
+                     color: targetSummary.isGood ? 'var(--accent-emerald)' : 'var(--status-error)'
                    }}>
                      {targetSummary.direction} {targetSummary.pct}%
                    </span>
