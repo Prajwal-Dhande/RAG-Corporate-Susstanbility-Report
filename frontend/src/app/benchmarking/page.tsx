@@ -318,8 +318,10 @@ export default function BenchmarkingPage() {
               <h2 className="card-title">FY {baseReport?.fiscal_year} Performance</h2>
             </div>
             <div className="card-content" style={{ height: '350px', padding: '20px' }}>
-              {displayData.baseChart.length === 0 ? (
-                 <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No data available for {selectedKpi}</div>
+              {displayData.baseChart.length === 0 || !displayData.baseChart.some(d => d.value > 0) ? (
+                 <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--status-error)', fontWeight: 500, textAlign: 'center', padding: '0 20px' }}>
+                   No data extracted for {selectedKpi} in the FY {baseReport?.fiscal_year} report.
+                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={displayData.baseChart}>
@@ -331,7 +333,7 @@ export default function BenchmarkingPage() {
                       itemStyle={{ color: '#fff' }}
                       formatter={(val: any) => [val.toLocaleString(), 'Value']}
                     />
-                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={80}>
                        {displayData.baseChart.map((entry, index) => (
                          <Cell key={`cell-${index}`} fill="var(--accent-violet)" />
                        ))}
@@ -348,8 +350,10 @@ export default function BenchmarkingPage() {
               <h2 className="card-title">FY {compareReport?.fiscal_year} Performance</h2>
             </div>
             <div className="card-content" style={{ height: '350px', padding: '20px' }}>
-              {displayData.compareChart.length === 0 ? (
-                 <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No data available for {selectedKpi}</div>
+              {displayData.compareChart.length === 0 || !displayData.compareChart.some(d => d.value > 0) ? (
+                 <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--status-error)', fontWeight: 500, textAlign: 'center', padding: '0 20px' }}>
+                   No data extracted for {selectedKpi} in the FY {compareReport?.fiscal_year} report.
+                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={displayData.compareChart}>
@@ -361,7 +365,7 @@ export default function BenchmarkingPage() {
                       itemStyle={{ color: '#fff' }}
                       formatter={(val: any) => [val.toLocaleString(), 'Value']}
                     />
-                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={80}>
                        {displayData.compareChart.map((entry, index) => (
                          <Cell key={`cell-${index}`} fill={targetSummary?.isGood ? "var(--accent-emerald)" : "var(--status-error)"} />
                        ))}
