@@ -103,12 +103,21 @@ export default function BenchmarkingPage() {
     
     // Simple mock filter based on KPI type
     if (selectedKpi === 'GHG Emissions') {
-       filtered = generatedData.filter(d => d.kpi_name.toLowerCase().includes('scope'));
+       filtered = generatedData.filter(d => 
+         d.kpi_name.toLowerCase().includes('scope') || 
+         d.kpi_name.toLowerCase().includes('ghg') || 
+         d.kpi_name.toLowerCase().includes('emission')
+       );
        if (selectedScope !== 'All Scopes') {
          filtered = filtered.filter(d => d.kpi_name.toLowerCase().includes(selectedScope.toLowerCase()));
        }
-    } else {
-       filtered = generatedData.filter(d => !d.kpi_name.toLowerCase().includes('scope'));
+    } else if (selectedKpi === 'Energy Consumption') {
+       filtered = generatedData.filter(d => 
+         d.kpi_name.toLowerCase().includes('energy') || 
+         d.kpi_name.toLowerCase().includes('electricity')
+       );
+    } else if (selectedKpi === 'Water Usage') {
+       filtered = generatedData.filter(d => d.kpi_name.toLowerCase().includes('water'));
     }
 
     const baseName = baseReport ? `${baseReport.company_name} (FY ${baseReport.fiscal_year})` : 'Base';

@@ -99,9 +99,9 @@ async def analyze_benchmark(report_ids: List[str] = Body(...), db: AsyncSession 
             else:
                 report_info[rid] = f"Report {rid[:8]}"
 
-    # Fetch benchmark data (assuming target_year=2024 for simplicity, or we can make it dynamic)
+    # Fetch benchmark data dynamically for all KPIs
     start = time.time()
-    results = await analyzer.compare_emissions(report_ids, target_year=2024)
+    results = await analyzer.compare_all_kpis(report_ids)
     duration = time.time() - start
 
     # Map report_ids to company names in results

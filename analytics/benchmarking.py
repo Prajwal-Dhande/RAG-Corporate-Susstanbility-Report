@@ -42,40 +42,52 @@ class BenchmarkAnalyzer:
     def __init__(self, graph: GraphBackend):
         self.graph = graph
 
-    async def compare_emissions(self, report_ids: list[str], target_year: int) -> list[BenchmarkResult]:
+    async def compare_all_kpis(self, report_ids: list[str]) -> list[BenchmarkResult]:
         """
-        Compare Scope 1/2/3 emissions across multiple reports for a given year.
+        Compare all available KPIs across multiple reports by fetching real data from the Graph Database.
         """
         results = []
-        scope_names = ["Scope 1 Emissions", "Scope 2 Emissions", "Scope 3 Emissions"]
+        all_kpis_by_report = {}
+        
+        for rid in report_ids:
+            kpis = await self.graph.get_entities_by_type(EntityType.KPI.value, rid)
+            all_kpis_by_report[rid] = kpis
+            
+        grouped_data = {}
+        
+        for rid, kpis in all_kpis_by_report.items():
+            for k in kpis:
+                n_name = k.name.lower()
+                cat = k.name
+                # Normalize common KPI names for grouping across reports
+                if "scope 1" in n_name: cat = "Scope 1 Emissions"
+                elif "scope 2" in n_name: cat = "Scope 2 Emissions"
+                elif "scope 3" in n_name: cat = "Scope 3 Emissions"
+                elif "energy" in n_name: cat = "Energy Consumption"
+                elif "water" in n_name: cat = "Water Usage"
+                elif "waste" in n_name: cat = "Waste Generation"
+                elif "diversity" in n_name: cat = "Diversity & Inclusion"
+                
+                neighbors = await self.graph.get_entity_neighbors(k.id, max_depth=1)
+                val_entity = next((e for e in neighbors.get("entities", []) if e.type in (EntityType.KPI_VALUE.value, EntityType.ACTUAL_VALUE.value)), None)
+                
+                if val_entity:
+                    import re
+                    numbers = re.findall(r'[-+]?\d[\d,]*\.?\d*', val_entity.name)
+                    if numbers:
+                        if cat not in grouped_data:
+                            grouped_data[cat] = {}
+                        grouped_data[cat][rid] = {
+                            "value": float(numbers[0].replace(",", "")),
+                            "raw": val_entity.name
+                        }
 
-        for scope in scope_names:
-            companies_data = {}
-            for report_id in report_ids:
-                # Find the KPI for this report
-                kpis = await self.graph.get_entities_by_type(EntityType.KPI.value, report_id)
-                kpi_entity = next((k for k in kpis if scope.lower() in k.name.lower()), None)
-
-                if kpi_entity:
-                    # Find values for this KPI
-                    neighbors = await self.graph.get_entity_neighbors(kpi_entity.id, max_depth=1)
-                    # For simplicity, extract the first numeric value associated (in a real system, filter by target_year)
-                    val_entity = next((e for e in neighbors.get("entities", []) if e.type in (EntityType.KPI_VALUE.value, EntityType.ACTUAL_VALUE.value)), None)
-                    if val_entity:
-                        import re
-                        numbers = re.findall(r'[-+]?\d[\d,]*\.?\d*', val_entity.name)
-                        if numbers:
-                            companies_data[report_id] = {
-                                "value": float(numbers[0].replace(",", "")),
-                                "raw": val_entity.name
-                            }
-
-            if companies_data:
-                results.append(BenchmarkResult(
-                    kpi_name=scope,
-                    companies=companies_data,
-                    unit="t CO2e", # normalized
-                    year=target_year
-                ))
+        for kpi_name, companies_data in grouped_data.items():
+            results.append(BenchmarkResult(
+                kpi_name=kpi_name,
+                companies=companies_data,
+                unit="Metric Units",
+                year=2024
+            ))
 
         return results
