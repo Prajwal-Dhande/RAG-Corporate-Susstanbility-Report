@@ -16,7 +16,7 @@ const navLinks = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/graph', label: 'Knowledge Graph', icon: GitBranch },
   { href: '/evidence', label: 'Evidence Explorer', icon: Search },
-  { href: '/longitudinal', label: 'Trend Analysis', icon: Activity },
+  { href: '/benchmarking', label: 'Report Benchmarking', icon: Activity },
 ];
 
 export default function Sidebar() {

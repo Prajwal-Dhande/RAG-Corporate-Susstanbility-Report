@@ -94,7 +94,10 @@ async def analyze_benchmark(report_ids: List[str] = Body(...), db: AsyncSession 
         if report:
             c = await db.execute(select(Company).where(Company.id == report.company_id))
             company = c.scalar_one_or_none()
-            report_info[rid] = company.name if company else f"Report {rid[:8]}"
+            if company:
+                report_info[rid] = f"{company.name} (FY {report.fiscal_year})"
+            else:
+                report_info[rid] = f"Report {rid[:8]}"
 
     # Fetch benchmark data (assuming target_year=2024 for simplicity, or we can make it dynamic)
     start = time.time()

@@ -2,16 +2,25 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { getReports, getBenchmarkData, Report } from '@/lib/api';
-import { BarChart2, AlertCircle, RefreshCw } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart2, AlertCircle, RefreshCw, Play, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { useSearchParams } from 'next/navigation';
 
 export default function BenchmarkingPage() {
+  const searchParams = useSearchParams();
+  const initialId = searchParams.get('id');
+
   const [reports, setReports] = useState<Report[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [benchmarkData, setBenchmarkData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [baseReportId, setBaseReportId] = useState<string>(initialId || '');
+  const [compareReportId, setCompareReportId] = useState<string>('');
+  
+  const [selectedKpi, setSelectedKpi] = useState('GHG Emissions');
+  const [selectedScope, setSelectedScope] = useState('All Scopes');
+  
+  const [generatedData, setGeneratedData] = useState<any[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasGenerated, setHasGenerated] = useState(false);
 
   useEffect(() => {
     loadReports();
@@ -19,228 +28,328 @@ export default function BenchmarkingPage() {
 
   async function loadReports() {
     try {
-      setLoading(true);
       const data = await getReports();
-      const processedReports = data.filter(r => r.status === 'completed');
-      setReports(processedReports);
-      
-      // Auto-select first two by default if available
-      if (processedReports.length >= 2) {
-        setSelectedIds([processedReports[0].id, processedReports[1].id]);
-      } else if (processedReports.length === 1) {
-        setSelectedIds([processedReports[0].id]);
+      const processed = data.filter(r => r.status === 'completed');
+      setReports(processed);
+      if (!baseReportId && processed.length > 0) {
+        setBaseReportId(processed[0].id);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load reports');
-    } finally {
-      setLoading(false);
     }
   }
 
-  useEffect(() => {
-    if (selectedIds.length > 0) {
-      runBenchmark();
-    } else {
-      setBenchmarkData([]);
-    }
-  }, [selectedIds]);
+  const baseReport = reports.find(r => r.id === baseReportId);
+  const compareReport = reports.find(r => r.id === compareReportId);
 
-  async function runBenchmark() {
+  // Filter available comparison reports to be the same company, different year
+  const availableCompareReports = useMemo(() => {
+    if (!baseReport) return reports;
+    return reports.filter(r => r.company_name === baseReport.company_name && r.id !== baseReport.id);
+  }, [baseReport, reports]);
+
+  async function handleGenerate() {
+    if (!baseReportId || !compareReportId) return;
     try {
       setAnalyzing(true);
-      const data = await getBenchmarkData(selectedIds);
+      setHasGenerated(true);
+      const data = await getBenchmarkData([baseReportId, compareReportId]);
       if (data && data.results) {
-        setBenchmarkData(data.results);
+        setGeneratedData(data.results);
       }
     } catch (err: any) {
       console.error(err);
+      setError('Analysis failed');
     } finally {
       setAnalyzing(false);
     }
   }
 
-  const toggleSelection = (id: string) => {
-    setSelectedIds(prev => 
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
-  };
+  // Process data for side-by-side charts
+  const displayData = useMemo(() => {
+    let filtered = generatedData;
+    
+    // Simple mock filter based on KPI type
+    if (selectedKpi === 'GHG Emissions') {
+       filtered = generatedData.filter(d => d.kpi_name.toLowerCase().includes('scope'));
+       if (selectedScope !== 'All Scopes') {
+         filtered = filtered.filter(d => d.kpi_name.toLowerCase().includes(selectedScope.toLowerCase()));
+       }
+    } else {
+       filtered = generatedData.filter(d => !d.kpi_name.toLowerCase().includes('scope'));
+    }
 
-  // Colors for different companies
-  const colors = ['#6c3bff', '#a855f7', '#ec4899', '#f43f5e', '#f97316'];
+    const baseName = baseReport ? `${baseReport.company_name} (FY ${baseReport.fiscal_year})` : 'Base';
+    const compareName = compareReport ? `${compareReport.company_name} (FY ${compareReport.fiscal_year})` : 'Compare';
 
-  // Prepare data for recharts: group by KPI, with each company as a bar
-  const chartData = useMemo(() => {
-    return benchmarkData.map(result => {
-      const dataPoint: any = {
-        name: result.kpi_name,
-        unit: result.unit
-      };
-      // add companies
-      Object.entries(result.companies).forEach(([comp, valInfo]: [string, any]) => {
-        dataPoint[comp] = valInfo.value;
-      });
-      return dataPoint;
+    const baseChart = filtered.map(d => ({
+      name: d.kpi_name,
+      value: d.companies[baseName]?.value || 0,
+      unit: d.unit
+    }));
+
+    const compareChart = filtered.map(d => ({
+      name: d.kpi_name,
+      value: d.companies[compareName]?.value || 0,
+      unit: d.unit
+    }));
+
+    return { baseChart, compareChart, filtered, baseName, compareName };
+  }, [generatedData, selectedKpi, selectedScope, baseReport, compareReport]);
+
+  const targetSummary = useMemo(() => {
+    if (!hasGenerated || generatedData.length === 0) return null;
+    let totalBase = 0;
+    let totalCompare = 0;
+    
+    displayData.filtered.forEach(d => {
+      totalBase += (d.companies[displayData.baseName]?.value || 0);
+      totalCompare += (d.companies[displayData.compareName]?.value || 0);
     });
-  }, [benchmarkData]);
 
-  // Extract unique company names from the data for the legend/bars
-  const companyNames = useMemo(() => {
-    const names = new Set<string>();
-    benchmarkData.forEach(res => {
-      Object.keys(res.companies).forEach(c => names.add(c));
-    });
-    return Array.from(names);
-  }, [benchmarkData]);
+    if (totalBase === 0) return { text: "No baseline data available for comparison.", isGood: false, pct: 0, direction: "N/A" };
+    
+    const diff = totalCompare - totalBase;
+    const pct = (diff / totalBase) * 100;
+    
+    // Logic: for GHG/Energy/Water, decrease is usually good
+    const isGood = diff <= 0;
+    
+    return {
+       direction: diff > 0 ? "Increased" : "Decreased",
+       pct: Math.abs(pct).toFixed(1),
+       isGood,
+       text: `Total ${selectedKpi} have ${diff > 0 ? 'increased' : 'decreased'} by ${Math.abs(pct).toFixed(1)}% between FY ${baseReport?.fiscal_year} and FY ${compareReport?.fiscal_year}.`
+    };
+  }, [displayData, baseReport, compareReport, generatedData, hasGenerated, selectedKpi]);
 
   return (
-    <div className="page-container">
-      <header className="page-header">
+    <div className="page-container" style={{ maxWidth: '1400px' }}>
+      <header className="page-header" style={{ marginBottom: '24px' }}>
         <div>
           <h1 className="page-title">
             <BarChart2 size={24} style={{ color: 'var(--accent-blue)' }} />
-            Cross-Company Benchmarking
+            Year-over-Year Report Benchmarking
           </h1>
-          <p className="page-subtitle">Compare sustainability KPIs and emissions across multiple companies.</p>
+          <p className="page-subtitle">Compare performance metrics of the same organization across different fiscal years.</p>
         </div>
       </header>
 
       {error && (
-        <div className="error-banner">
+        <div className="error-banner" style={{ marginBottom: '20px' }}>
           <AlertCircle size={20} />
           {error}
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '24px' }}>
-        
-        {/* Sidebar: Report Selection */}
-        <div className="card" style={{ alignSelf: 'start' }}>
-          <div className="card-header">
-            <h2 className="card-title">Select Reports</h2>
+      {/* TOP CONTROL PANEL */}
+      <div className="card" style={{ marginBottom: '24px' }}>
+        <div className="card-content" style={{ padding: '20px', display: 'flex', gap: '20px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          
+          <div style={{ flex: 1, minWidth: '200px' }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Base Report (Year 1)
+            </label>
+            <select 
+              value={baseReportId} 
+              onChange={e => {
+                setBaseReportId(e.target.value);
+                setCompareReportId(''); // reset comparison
+                setHasGenerated(false);
+              }}
+              style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+            >
+              <option value="" disabled>Select Base Report...</option>
+              {reports.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.company_name} - FY {r.fiscal_year}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="card-content" style={{ padding: '0 20px 20px' }}>
-            {loading ? (
-              <p style={{ color: 'var(--text-muted)' }}>Loading reports...</p>
-            ) : reports.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)' }}>No processed reports available.</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {reports.map(report => (
-                  <label 
-                    key={report.id} 
-                    style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: '10px',
-                      padding: '10px',
-                      backgroundColor: 'var(--bg-secondary)',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      border: selectedIds.includes(report.id) ? '1px solid var(--accent-blue)' : '1px solid transparent'
-                    }}
-                  >
-                    <input 
-                      type="checkbox" 
-                      checked={selectedIds.includes(report.id)}
-                      onChange={() => toggleSelection(report.id)}
-                      style={{ accentColor: 'var(--accent-blue)' }}
-                    />
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>{report.company_name || report.title || 'Unknown Company'}</span>
-                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>FY {report.fiscal_year || 'N/A'} • {report.entity_count} entities</span>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
 
-        {/* Main Content: Charts */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={{ flex: 1, minWidth: '200px' }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Comparison Report (Year 2)
+            </label>
+            <select 
+              value={compareReportId} 
+              onChange={e => {
+                setCompareReportId(e.target.value);
+                setHasGenerated(false);
+              }}
+              disabled={!baseReportId || availableCompareReports.length === 0}
+              style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', opacity: (!baseReportId || availableCompareReports.length === 0) ? 0.5 : 1 }}
+            >
+              <option value="" disabled>
+                {availableCompareReports.length === 0 ? 'No other years available for this company' : 'Select Target Year...'}
+              </option>
+              {availableCompareReports.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.company_name} - FY {r.fiscal_year}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ width: '180px' }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>
+              KPI Category
+            </label>
+            <select 
+              value={selectedKpi} 
+              onChange={e => setSelectedKpi(e.target.value)}
+              style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+            >
+              <option value="GHG Emissions">GHG Emissions</option>
+              <option value="Energy Consumption">Energy Consumption</option>
+              <option value="Water Usage">Water Usage</option>
+            </select>
+          </div>
+
+          <div style={{ width: '180px' }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Analysis Scope
+            </label>
+            <select 
+              value={selectedScope} 
+              onChange={e => setSelectedScope(e.target.value)}
+              style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+            >
+              <option value="All Scopes">All Scopes</option>
+              <option value="Scope 1">Scope 1 Only</option>
+              <option value="Scope 2">Scope 2 Only</option>
+              <option value="Scope 3">Scope 3 Only</option>
+            </select>
+          </div>
+
+          <button 
+            onClick={handleGenerate}
+            disabled={!baseReportId || !compareReportId || analyzing}
+            style={{ 
+              height: '42px',
+              padding: '0 24px', 
+              backgroundColor: (!baseReportId || !compareReportId) ? 'var(--border-color)' : 'var(--accent-blue)', 
+              color: '#fff', 
+              border: 'none', 
+              borderRadius: '8px', 
+              fontWeight: 600,
+              cursor: (!baseReportId || !compareReportId || analyzing) ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              transition: 'all 0.2s'
+            }}
+          >
+            {analyzing ? <RefreshCw size={18} className="spin" /> : <Play size={18} />}
+            Generate Report
+          </button>
+        </div>
+      </div>
+
+      {/* GRAPHS SECTION (Side by Side) */}
+      {hasGenerated && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+          
+          {/* Base Year Graph */}
           <div className="card">
-            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <h2 className="card-title">Emissions Comparison</h2>
-              {analyzing && <RefreshCw size={16} className="spin" style={{ color: 'var(--text-muted)' }} />}
+            <div className="card-header">
+              <h2 className="card-title">FY {baseReport?.fiscal_year} Performance</h2>
             </div>
-            
-            <div className="card-content" style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {selectedIds.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
-                  Select at least one report to benchmark.
-                </div>
-              ) : chartData.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
-                  {analyzing ? 'Analyzing data...' : 'No comparable emissions data found in the selected reports.'}
-                </div>
+            <div className="card-content" style={{ height: '350px', padding: '20px' }}>
+              {displayData.baseChart.length === 0 ? (
+                 <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No data available for {selectedKpi}</div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <BarChart data={displayData.baseChart}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
                     <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickMargin={10} />
-                    <YAxis stroke="var(--text-muted)" fontSize={12} tickFormatter={(val) => `${val.toLocaleString()}`} />
+                    <YAxis stroke="var(--text-muted)" fontSize={12} tickFormatter={v => v.toLocaleString()} />
                     <Tooltip 
                       contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)', borderRadius: '8px' }}
                       itemStyle={{ color: '#fff' }}
-                      formatter={(value: any) => [`${Number(value).toLocaleString()}`, '']}
+                      formatter={(val: any) => [val.toLocaleString(), 'Value']}
                     />
-                    <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                    {companyNames.map((comp, idx) => (
-                      <Bar 
-                        key={comp} 
-                        dataKey={comp} 
-                        fill={colors[idx % colors.length]} 
-                        radius={[4, 4, 0, 0]}
-                        maxBarSize={60}
-                      />
-                    ))}
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                       {displayData.baseChart.map((entry, index) => (
+                         <Cell key={`cell-${index}`} fill="var(--accent-purple)" />
+                       ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               )}
             </div>
           </div>
 
-          {/* Details Table */}
-          {benchmarkData.length > 0 && (
-            <div className="card">
-              <div className="card-header">
-                <h2 className="card-title">Raw Data Matrix</h2>
-              </div>
-              <div className="card-content" style={{ padding: '0 20px 20px' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>
-                      <th style={{ padding: '12px 8px', color: 'var(--text-muted)', fontWeight: 500 }}>KPI</th>
-                      {companyNames.map(comp => (
-                        <th key={comp} style={{ padding: '12px 8px', color: 'var(--text-muted)', fontWeight: 500 }}>{comp}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {benchmarkData.map(res => (
-                      <tr key={res.kpi_name} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                        <td style={{ padding: '12px 8px', fontWeight: 500 }}>{res.kpi_name}</td>
-                        {companyNames.map(comp => (
-                          <td key={comp} style={{ padding: '12px 8px' }}>
-                            {res.companies[comp] ? (
-                              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                <span>{res.companies[comp].value.toLocaleString()} {res.unit}</span>
-                                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>"{res.companies[comp].raw}"</span>
-                              </div>
-                            ) : (
-                              <span style={{ color: 'var(--text-muted)' }}>—</span>
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          {/* Compare Year Graph */}
+          <div className="card">
+            <div className="card-header">
+              <h2 className="card-title">FY {compareReport?.fiscal_year} Performance</h2>
             </div>
-          )}
+            <div className="card-content" style={{ height: '350px', padding: '20px' }}>
+              {displayData.compareChart.length === 0 ? (
+                 <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No data available for {selectedKpi}</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={displayData.compareChart}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                    <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickMargin={10} />
+                    <YAxis stroke="var(--text-muted)" fontSize={12} tickFormatter={v => v.toLocaleString()} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)', borderRadius: '8px' }}
+                      itemStyle={{ color: '#fff' }}
+                      formatter={(val: any) => [val.toLocaleString(), 'Value']}
+                    />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                       {displayData.compareChart.map((entry, index) => (
+                         <Cell key={`cell-${index}`} fill={targetSummary?.isGood ? "var(--accent-emerald)" : "var(--accent-red)"} />
+                       ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* TARGET SUMMARY SECTION */}
+      {hasGenerated && targetSummary && (
+        <div className="card" style={{ borderLeft: `4px solid ${targetSummary.isGood ? 'var(--accent-emerald)' : 'var(--accent-red)'}` }}>
+          <div className="card-content" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <div style={{ padding: '16px', borderRadius: '50%', backgroundColor: targetSummary.isGood ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)' }}>
+               {targetSummary.isGood ? (
+                  <TrendingDown size={32} style={{ color: 'var(--accent-emerald)' }} />
+               ) : (
+                  <TrendingUp size={32} style={{ color: 'var(--accent-red)' }} />
+               )}
+            </div>
+            <div>
+              <h3 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+                Target Summary: {selectedKpi}
+              </h3>
+              <p style={{ fontSize: 16, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+                {targetSummary.text} 
+                {targetSummary.pct !== '0' && (
+                   <span style={{ 
+                     display: 'inline-block', 
+                     marginLeft: 10,
+                     padding: '2px 10px', 
+                     borderRadius: '12px', 
+                     fontSize: 14,
+                     fontWeight: 600,
+                     backgroundColor: targetSummary.isGood ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                     color: targetSummary.isGood ? 'var(--accent-emerald)' : 'var(--accent-red)'
+                   }}>
+                     {targetSummary.direction} {targetSummary.pct}%
+                   </span>
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
