@@ -30,7 +30,7 @@ export default function Sidebar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Activity size={24} style={{ color: 'var(--accent-emerald)' }} />
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+            <div className="gradient-text" style={{ fontWeight: 800, fontSize: 18, letterSpacing: '-0.03em' }}>
               SustainGraph
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>

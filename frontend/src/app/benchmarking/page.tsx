@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { getReports, getBenchmarkData, uploadReport, Report } from '@/lib/api';
 import { BarChart2, AlertCircle, RefreshCw, Play, TrendingUp, TrendingDown, Upload, Loader2 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import { useSearchParams } from 'next/navigation';
 
 export default function BenchmarkingPage() {
@@ -55,10 +55,10 @@ export default function BenchmarkingPage() {
   const baseReport = reports.find(r => r.id === baseReportId);
   const compareReport = reports.find(r => r.id === compareReportId);
 
-  // Filter available comparison reports to be the same company, different year
+  // Allow selecting any other report (useful for competitor benchmarking or if company names slightly mismatch)
   const availableCompareReports = useMemo(() => {
     if (!baseReport) return [];
-    return reports.filter(r => r.company_name === baseReport.company_name && r.id !== baseReport.id);
+    return reports.filter(r => r.id !== baseReport.id);
   }, [baseReport, reports]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -123,19 +123,20 @@ export default function BenchmarkingPage() {
     const baseName = baseReport ? `${baseReport.company_name} (FY ${baseReport.fiscal_year})` : 'Base';
     const compareName = compareReport ? `${compareReport.company_name} (FY ${compareReport.fiscal_year})` : 'Compare';
 
-    const baseChart = filtered.map(d => ({
-      name: d.kpi_name,
-      value: d.companies[baseName]?.value || 0,
-      unit: d.unit
-    }));
+    const timeSeriesData: any[] = [
+      { year: baseName },
+      { year: compareName }
+    ];
 
-    const compareChart = filtered.map(d => ({
-      name: d.kpi_name,
-      value: d.companies[compareName]?.value || 0,
-      unit: d.unit
-    }));
+    const kpiNames: string[] = [];
 
-    return { baseChart, compareChart, filtered, baseName, compareName };
+    filtered.forEach(d => {
+      kpiNames.push(d.kpi_name);
+      timeSeriesData[0][d.kpi_name] = d.companies[baseName]?.value || 0;
+      timeSeriesData[1][d.kpi_name] = d.companies[compareName]?.value || 0;
+    });
+
+    return { timeSeriesData, kpiNames, filtered, baseName, compareName };
   }, [generatedData, selectedKpi, selectedScope, baseReport, compareReport]);
 
   const targetSummary = useMemo(() => {
@@ -167,13 +168,21 @@ export default function BenchmarkingPage() {
   // Only allow completed base reports
   const completedReports = reports.filter(r => r.status === 'completed');
 
+  const COLORS = [
+    'var(--accent-blue)', 
+    'var(--accent-emerald)', 
+    'var(--accent-violet)', 
+    'var(--accent-amber)', 
+    'var(--accent-rose)'
+  ];
+
   return (
-    <div className="page-container" style={{ maxWidth: '1400px' }}>
-      <header className="page-header" style={{ marginBottom: '24px' }}>
+    <div className="page-container animate-fade-in-up">
+      <header className="page-header">
         <div>
           <h1 className="page-title">
-            <BarChart2 size={24} style={{ color: 'var(--accent-blue)' }} />
-            Year-over-Year Report Benchmarking
+            <BarChart2 size={32} style={{ color: 'var(--accent-blue)' }} />
+            Year-over-Year Benchmarking
           </h1>
           <p className="page-subtitle">Compare performance metrics of the same organization across different fiscal years.</p>
         </div>
@@ -187,8 +196,8 @@ export default function BenchmarkingPage() {
       )}
 
       {/* TOP CONTROL PANEL */}
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <div className="card-content" style={{ padding: '20px', display: 'flex', gap: '20px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+      <div className="card animate-fade-in-up stagger-1" style={{ marginBottom: '32px' }}>
+        <div className="card-content" style={{ display: 'flex', gap: '20px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           
           <div style={{ flex: 1, minWidth: '200px' }}>
             <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>
@@ -290,16 +299,16 @@ export default function BenchmarkingPage() {
             style={{ 
               height: '42px',
               padding: '0 24px', 
-              backgroundColor: (!baseReportId || !compareReportId) ? 'var(--border-color)' : 'var(--accent-blue)', 
+              backgroundColor: (!baseReportId || !compareReportId || analyzing) ? 'var(--border-color)' : 'var(--accent-blue)', 
               color: '#fff', 
               border: 'none', 
               borderRadius: '8px', 
-              fontWeight: 600,
+              fontWeight: 700,
               cursor: (!baseReportId || !compareReportId || analyzing) ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              transition: 'all 0.2s'
+              transition: 'all 0.3s'
             }}
           >
             {analyzing ? <RefreshCw size={18} className="spin" /> : <Play size={18} />}
@@ -308,80 +317,56 @@ export default function BenchmarkingPage() {
         </div>
       </div>
 
-      {/* GRAPHS SECTION (Side by Side) */}
-      {hasGenerated && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
-          
-          {/* Base Year Graph */}
-          <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">FY {baseReport?.fiscal_year} Performance</h2>
-            </div>
-            <div className="card-content" style={{ height: '350px', padding: '20px' }}>
-              {displayData.baseChart.length === 0 || !displayData.baseChart.some(d => d.value > 0) ? (
-                 <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--status-error)', fontWeight: 500, textAlign: 'center', padding: '0 20px' }}>
-                   No data extracted for {selectedKpi} in the FY {baseReport?.fiscal_year} report.
-                 </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={displayData.baseChart}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                    <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickMargin={10} />
-                    <YAxis stroke="var(--text-muted)" fontSize={12} tickFormatter={v => v.toLocaleString()} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)', borderRadius: '8px' }}
-                      itemStyle={{ color: '#fff' }}
-                      formatter={(val: any) => [val.toLocaleString(), 'Value']}
-                    />
-                    <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={80}>
-                       {displayData.baseChart.map((entry, index) => (
-                         <Cell key={`cell-${index}`} fill="var(--accent-violet)" />
-                       ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
+      {/* GRAPHS SECTION (Combined Side-by-Side Bars) */}
+      {!hasGenerated ? (
+        <div className="card animate-fade-in-up stagger-2" style={{ padding: '80px 20px', textAlign: 'center', marginBottom: '32px', borderStyle: 'dashed' }}>
+          <TrendingUp size={64} className="floating-icon" style={{ color: 'var(--accent-blue)', opacity: 0.5, marginBottom: '24px' }} />
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px' }}>Ready to Benchmark</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: 16 }}>Select a base report and a comparison report, then click <strong style={{ color: 'var(--accent-blue)' }}>Generate</strong> to view the YoY analysis.</p>
+        </div>
+      ) : (
+        <div className="card animate-fade-in-up stagger-2" style={{ marginBottom: '32px' }}>
+          <div className="card-header">
+            <h2 className="card-title">Comparative Performance: {selectedKpi}</h2>
           </div>
-
-          {/* Compare Year Graph */}
-          <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">FY {compareReport?.fiscal_year} Performance</h2>
-            </div>
-            <div className="card-content" style={{ height: '350px', padding: '20px' }}>
-              {displayData.compareChart.length === 0 || !displayData.compareChart.some(d => d.value > 0) ? (
-                 <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--status-error)', fontWeight: 500, textAlign: 'center', padding: '0 20px' }}>
-                   No data extracted for {selectedKpi} in the FY {compareReport?.fiscal_year} report.
-                 </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={displayData.compareChart}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                    <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickMargin={10} />
-                    <YAxis stroke="var(--text-muted)" fontSize={12} tickFormatter={v => v.toLocaleString()} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)', borderRadius: '8px' }}
-                      itemStyle={{ color: '#fff' }}
-                      formatter={(val: any) => [val.toLocaleString(), 'Value']}
+          <div className="card-content" style={{ height: '480px' }}>
+            {displayData.timeSeriesData.length === 0 || displayData.kpiNames.length === 0 ? (
+               <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--status-error)', fontWeight: 600, textAlign: 'center' }}>
+                 No comparative data extracted for {selectedKpi} in the selected scopes.
+               </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={displayData.timeSeriesData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                  <XAxis dataKey="year" stroke="var(--text-muted)" fontSize={14} fontWeight={600} tickMargin={12} />
+                  <YAxis stroke="var(--text-muted)" fontSize={12} tickFormatter={v => v.toLocaleString()} />
+                  <Tooltip 
+                    cursor={{ stroke: 'var(--border-color)', strokeWidth: 1, strokeDasharray: '3 3' }}
+                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)' }}
+                    itemStyle={{ color: 'var(--text-primary)' }}
+                  />
+                  <Legend verticalAlign="top" height={36} iconType="circle" />
+                  {displayData.kpiNames.map((kpi, idx) => (
+                    <Line 
+                      key={kpi} 
+                      type="monotone" 
+                      dataKey={kpi} 
+                      stroke={COLORS[idx % COLORS.length]} 
+                      strokeWidth={4} 
+                      activeDot={{ r: 8 }} 
                     />
-                    <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={80}>
-                       {displayData.compareChart.map((entry, index) => (
-                         <Cell key={`cell-${index}`} fill={targetSummary?.isGood ? "var(--accent-emerald)" : "var(--status-error)"} />
-                       ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       )}
 
       {/* TARGET SUMMARY SECTION */}
       {hasGenerated && targetSummary && (
-        <div className="card" style={{ borderLeft: `4px solid ${targetSummary.isGood ? 'var(--accent-emerald)' : 'var(--status-error)'}` }}>
-          <div className="card-content" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <div className="card animate-fade-in-up stagger-3" style={{ borderLeft: `4px solid ${targetSummary.isGood ? 'var(--accent-emerald)' : 'var(--status-error)'}`, marginBottom: '32px' }}>
+          <div className="card-content" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '24px' }}>
             <div style={{ padding: '16px', borderRadius: '50%', backgroundColor: targetSummary.isGood ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)' }}>
                {targetSummary.isGood ? (
                   <TrendingDown size={32} style={{ color: 'var(--accent-emerald)' }} />
@@ -411,6 +396,56 @@ export default function BenchmarkingPage() {
                 )}
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* DATA TABLE SECTION */}
+      {hasGenerated && displayData.filtered && displayData.filtered.length > 0 && (
+        <div className="card animate-fade-in-up stagger-4">
+          <div className="card-header">
+            <h2 className="card-title">Detailed Variance Breakdown</h2>
+          </div>
+          <div className="card-content" style={{ overflowX: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Parameter</th>
+                  <th>FY {baseReport?.fiscal_year} (Base)</th>
+                  <th>FY {compareReport?.fiscal_year} (Target)</th>
+                  <th>Variance</th>
+                  <th>% Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayData.filtered.map((d, i) => {
+                  const baseVal = d.companies[displayData.baseName]?.value || 0;
+                  const compVal = d.companies[displayData.compareName]?.value || 0;
+                  const diff = compVal - baseVal;
+                  const pct = baseVal !== 0 ? ((diff / baseVal) * 100).toFixed(1) : 'N/A';
+                  const isGood = diff <= 0;
+                  
+                  return (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{d.kpi_name}</td>
+                      <td>{baseVal.toLocaleString()} {d.unit}</td>
+                      <td>{compVal.toLocaleString()} {d.unit}</td>
+                      <td style={{ color: diff > 0 ? 'var(--status-error)' : 'var(--accent-emerald)', fontWeight: 600 }}>
+                        {diff > 0 ? '+' : ''}{diff.toLocaleString()} {d.unit}
+                      </td>
+                      <td>
+                        {pct !== 'N/A' ? (
+                          <span className={`badge ${isGood ? 'badge-success' : 'badge-error'}`}>
+                            {diff > 0 ? <TrendingUp size={12}/> : <TrendingDown size={12}/>}
+                            {Math.abs(Number(pct))}%
+                          </span>
+                        ) : 'N/A'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

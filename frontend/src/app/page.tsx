@@ -86,7 +86,7 @@ export default function ReportsPage() {
     switch (status) {
       case 'completed': return <CheckCircle size={16} style={{ color: 'var(--status-success)' }} />;
       case 'failed': return <XCircle size={16} style={{ color: 'var(--status-error)' }} />;
-      default: return <Loader2 size={16} className="spinner" style={{ color: 'var(--accent-blue)' }} />;
+      default: return <Loader2 size={16} className="spin" style={{ color: 'var(--accent-blue)' }} />;
     }
   };
 

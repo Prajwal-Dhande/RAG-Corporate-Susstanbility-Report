@@ -97,11 +97,11 @@ class Neo4jBackend:
         """
         cypher_query = """
         MATCH (r:Report {id: $report_id})
-        OPTIONAL MATCH (r)-[rel*]-(connected)
+        OPTIONAL MATCH p = (r)-[*1..4]->(connected)
         
         // Fix: Explicitly group 'r' before combining lists
         WITH r, collect(distinct connected) AS connectedNodes, 
-             collect(distinct last(rel)) AS allRels
+             collect(distinct last(relationships(p))) AS allRels
         
         // Now combine the report node with connected nodes
         WITH [r] + connectedNodes AS allNodes, allRels
@@ -280,7 +280,7 @@ class Neo4jBackend:
     async def get_entities_by_type(self, entity_type: str, report_id: str) -> list:
         """Fetch entities by type for API resolution."""
         query = """
-        MATCH (r:Report {id: $report_id})-[*1..5]-(n)
+        MATCH (r:Report {id: $report_id})-[*1..4]->(n)
         WHERE $entity_type IN labels(n)
         RETURN DISTINCT n
         """
@@ -296,7 +296,7 @@ class Neo4jBackend:
     async def get_all_entities(self, report_id: str) -> list:
         """Fetch all entities for API resolution."""
         query = """
-        MATCH (r:Report {id: $report_id})-[*1..5]-(n)
+        MATCH (r:Report {id: $report_id})-[*1..4]->(n)
         RETURN DISTINCT n
         """
         try:
@@ -311,9 +311,9 @@ class Neo4jBackend:
     async def get_all_relations(self, report_id: str) -> list:
         """Fetch all relations for API resolution."""
         query = """
-        MATCH (r:Report {id: $report_id})-[*1..5]-(n)
-        MATCH (n)-[rel]->(m)
-        RETURN DISTINCT rel, n, m
+        MATCH p = (:Report {id: $report_id})-[*1..4]->(m)
+        UNWIND relationships(p) AS rel
+        RETURN DISTINCT rel, startNode(rel) AS n, endNode(rel) AS m
         """
         try:
             async with self.driver.session() as session:
