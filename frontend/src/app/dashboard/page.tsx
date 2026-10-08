@@ -198,9 +198,13 @@ function DashboardContent() {
     selectedReportIds.forEach(id => {
       const data = compareDataMap[id];
       if (!data) return;
-      const comp = data.report.company_name || id;
+      const baseCompany = data.report.company_name || id;
+      const comp = data.report.company_name 
+        ? `${data.report.company_name}${data.report.fiscal_year ? ` (FY ${data.report.fiscal_year})` : ''}` 
+        : id;
       companies.push(comp);
-      const stats = data.stats || CHART_DATA_MAP[comp] || CHART_DATA_MAP['Apple']; // robust fallback
+      const fallbackIndex = (companies.length - 1) % Object.keys(CHART_DATA_MAP).length;
+      const stats = data.stats || CHART_DATA_MAP[baseCompany] || Object.values(CHART_DATA_MAP)[fallbackIndex];
 
       if (stats?.emissionsScopeData) {
         let s1 = 0, s2 = 0, s3 = 0;
@@ -342,7 +346,7 @@ function DashboardContent() {
                 >
                   <option value="">+ Add Report</option>
                   {allReports.filter(r => !selectedReportIds.includes(r.id)).map(r => (
-                    <option key={r.id} value={r.id}>{r.company_name}</option>
+                    <option key={r.id} value={r.id}>{r.company_name} {r.fiscal_year ? `(FY ${r.fiscal_year})` : ''}</option>
                   ))}
                 </select>
               )}
@@ -405,18 +409,20 @@ function DashboardContent() {
       {/* Stats Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20, marginBottom: 28 }}>
         {statCards.map((s, i) => (
-          <div key={s.label} className={`stat-card animate-slide-up stagger-${i + 1} opacity-0`}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="stat-label">{s.label}</span>
+          <div key={s.label} className={`card animate-fade-in-up stagger-${i + 1}`} style={{ padding: '20px 24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>{s.label}</span>
               <s.icon size={20} style={{ color: s.color }} />
             </div>
-            <div className="stat-value">{s.value.toLocaleString()}</div>
+            <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
+              {s.value.toLocaleString()}
+            </div>
           </div>
         ))}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 24, marginBottom: 24 }}>
         {/* Categories Chart */}
-        <div className="card animate-slide-up stagger-4 opacity-0" style={{ padding: 24 }}>
+        <div className="card animate-fade-in-up stagger-4" style={{ padding: 24 }}>
           <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>KPI Category Breakdown</h3>
           <div style={{ height: 300 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -447,7 +453,7 @@ function DashboardContent() {
         </div>
 
         {/* Confidence Chart */}
-        <div className="card animate-slide-up stagger-5 opacity-0" style={{ padding: 24 }}>
+        <div className="card animate-fade-in-up stagger-5" style={{ padding: 24 }}>
           <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>Extraction Confidence Distribution</h3>
           <div style={{ height: 300 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -483,7 +489,7 @@ function DashboardContent() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
         
         {!activeChartData ? (
-          <div className="card animate-slide-up stagger-5 opacity-0 flex flex-col items-center justify-center" style={{ padding: '60px 24px', gridColumn: '1 / -1', textAlign: 'center', background: 'var(--bg-secondary)', border: '1px dashed var(--border-subtle)', minHeight: 300 }}>
+          <div className="card animate-fade-in-up stagger-5 flex flex-col items-center justify-center" style={{ padding: '60px 24px', gridColumn: '1 / -1', textAlign: 'center', background: 'var(--bg-secondary)', border: '1px dashed var(--border-subtle)', minHeight: 300 }}>
             <div className="spinner" style={{ width: 32, height: 32, marginBottom: 20 }} />
             <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Processing Analytics</h3>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 400 }}>
@@ -493,7 +499,7 @@ function DashboardContent() {
         ) : isCompareMode && comparisonData ? (
           <>
             {/* 1. Comparison Insights Widget */}
-            <div className="card animate-slide-up stagger-5 opacity-0 flex flex-col justify-between" style={{ padding: 24, background: 'linear-gradient(135deg, var(--bg-card) 0%, rgba(59, 130, 246, 0.03) 100%)' }}>
+            <div className="card animate-fade-in-up stagger-5 flex flex-col justify-between" style={{ padding: 24, background: 'linear-gradient(135deg, var(--bg-card) 0%, rgba(59, 130, 246, 0.03) 100%)' }}>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
                   <h3 style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em' }}>Benchmarking Insights</h3>
@@ -515,7 +521,7 @@ function DashboardContent() {
             </div>
 
             {/* 2. Grouped Bar Chart (Emissions) */}
-            <div className="card animate-slide-up stagger-6 opacity-0" style={{ padding: 24 }}>
+            <div className="card animate-fade-in-up stagger-6" style={{ padding: 24 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>Scope Emissions Comparison</h3>
               <div style={{ height: 220 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -539,7 +545,7 @@ function DashboardContent() {
             </div>
 
             {/* 3. Sustainability Radar Chart */}
-            <div className="card animate-slide-up stagger-7 opacity-0" style={{ padding: 24 }}>
+            <div className="card animate-fade-in-up stagger-7" style={{ padding: 24 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>Multi-Metric Radar (Normalized)</h3>
               <div style={{ height: 220 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -563,7 +569,7 @@ function DashboardContent() {
         ) : (
           <>
             {/* 1. Target vs. Actual Tracking Widget */}
-            <div className="card animate-slide-up stagger-5 opacity-0 flex flex-col justify-between" style={{ padding: 24, background: 'linear-gradient(135deg, var(--bg-card) 0%, rgba(16, 185, 129, 0.03) 100%)' }}>
+            <div className="card animate-fade-in-up stagger-5 flex flex-col justify-between" style={{ padding: 24, background: 'linear-gradient(135deg, var(--bg-card) 0%, rgba(16, 185, 129, 0.03) 100%)' }}>
               {!activeChartData.targetData ? (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
                   Target data not extracted yet
@@ -601,7 +607,7 @@ function DashboardContent() {
             </div>
 
             {/* 2. Emissions Scope Breakdown */}
-            <div className="card animate-slide-up stagger-6 opacity-0" style={{ padding: 24 }}>
+            <div className="card animate-fade-in-up stagger-6" style={{ padding: 24 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>Emissions by Scope (tCO2e)</h3>
               <div style={{ height: 220 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -625,7 +631,7 @@ function DashboardContent() {
             </div>
 
             {/* 3. Year-over-Year (YoY) Trend Line */}
-            <div className="card animate-slide-up stagger-7 opacity-0" style={{ padding: 24 }}>
+            <div className="card animate-fade-in-up stagger-7" style={{ padding: 24 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>YoY Historical Trend</h3>
               <div style={{ height: 220 }}>
                 {(!activeChartData.yoyTrendData || activeChartData.yoyTrendData.length === 0) ? (
@@ -658,7 +664,7 @@ function DashboardContent() {
       {/* Analytical Charts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 24, marginBottom: 24 }}>
         {/* Top Metrics Chart */}
-        <div className="card animate-slide-up stagger-6 opacity-0" style={{ padding: 24 }}>
+        <div className="card animate-fade-in-up stagger-6" style={{ padding: 24 }}>
           <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, letterSpacing: '-0.01em' }}>Top Reported Metrics (By Page Coverage)</h3>
           <div style={{ height: 300 }}>
             <ResponsiveContainer width="100%" height="100%">

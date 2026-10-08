@@ -66,7 +66,7 @@ RELATION TYPES:
 RULES:
 - Extract ONLY what is explicitly stated. Do NOT infer or hallucinate.
 - Each entity must reference the source component IDs from the layout.
-- Assign confidence scores (0.0-1.0) based on clarity of the source.
+- Assign confidence scores (0.0-1.0). Assign HIGH confidence (0.85-1.0) for explicitly stated KPIs, table data, and clear numeric values. Only use low confidence (< 0.6) for ambiguous text.
 - For tables, extract each row's KPI/value as separate entities.
 - For charts, describe what the chart shows and extract key data points.
 - Prefer specific entity names over generic ones.

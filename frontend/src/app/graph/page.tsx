@@ -344,7 +344,7 @@ function GraphContent() {
             onNodeClick={handleNodeClick}
             nodeCanvasObjectMode={() => "after"}
             nodeCanvasObject={(node: any, ctx, globalScale) => {
-              const nodeName = node.name || 'Unknown';
+              const nodeName = node.name || node.title || node.company_name || node.properties?.name || node.properties?.title || node.properties?.company_name || (node.type === 'Report' ? `${report?.company_name || 'Sustainability'} Report` : node.type) || 'Unknown';
               const label = nodeName.length > 20 ? nodeName.slice(0, 17) + '...' : nodeName;
               const fontSize = 12/globalScale;
               
@@ -367,7 +367,7 @@ function GraphContent() {
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: TYPE_COLORS[selectedEntity.type] || 'var(--text-muted)', marginBottom: 6 }}>
                   {selectedEntity.type}
                 </div>
-                <h3 style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>{selectedEntity.name}</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>{selectedEntity.name || selectedEntity.title || selectedEntity.company_name || selectedEntity.properties?.name || selectedEntity.properties?.title || selectedEntity.properties?.company_name || (selectedEntity.type === 'Report' ? `${report?.company_name || 'Sustainability'} Report` : selectedEntity.type) || 'Unknown'}</h3>
               </div>
               <button
                 type="button"

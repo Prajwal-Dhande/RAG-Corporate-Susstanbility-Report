@@ -15,6 +15,7 @@ export default function ReportsPage() {
   const [dragOver, setDragOver] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [fiscalYear, setFiscalYear] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState('');
   
   const [isCompareMode, setIsCompareMode] = useState(false);
@@ -41,7 +42,8 @@ export default function ReportsPage() {
     return () => clearInterval(interval);
   }, [reports, fetchReports]);
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = async () => {
+    if (!selectedFile) return;
     if (!companyName.trim()) {
       setError('Please enter a company name');
       return;
@@ -50,12 +52,13 @@ export default function ReportsPage() {
     setUploading(true);
     try {
       const res = await uploadReport(
-        file,
+        selectedFile,
         companyName.trim(),
         fiscalYear ? parseInt(fiscalYear) : undefined
       );
       setCompanyName('');
       setFiscalYear('');
+      setSelectedFile(null);
       await fetchReports();
       // Navigate to Dashboard to view the newly uploaded report
       router.push(`/dashboard?id=${res.id}`);
@@ -79,7 +82,12 @@ export default function ReportsPage() {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
-    if (file?.type === 'application/pdf') handleUpload(file);
+    if (file?.type === 'application/pdf') {
+      setSelectedFile(file);
+      setError('');
+    } else {
+      setError('Please select a valid PDF file.');
+    }
   };
 
   const statusIcon = (status: string) => {
@@ -145,20 +153,47 @@ export default function ReportsPage() {
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
           onClick={() => {
+            if (selectedFile) return; // Prevent clicking entire box when file is selected
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = '.pdf';
             input.onchange = (e) => {
               const file = (e.target as HTMLInputElement).files?.[0];
-              if (file) handleUpload(file);
+              if (file) {
+                setSelectedFile(file);
+                setError('');
+              }
             };
             input.click();
           }}
+          style={{ cursor: selectedFile ? 'default' : 'pointer' }}
         >
           {uploading ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
               <div className="spinner" style={{ width: 32, height: 32 }} />
               <span style={{ color: 'var(--text-secondary)' }}>Uploading and processing...</span>
+            </div>
+          ) : selectedFile ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+              <FileText size={36} style={{ color: 'var(--accent-blue)' }} />
+              <span style={{ fontWeight: 600 }}>{selectedFile.name}</span>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+              </span>
+              <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}
+                  style={{ padding: '8px 16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--status-error)' }}
+                >
+                  Cancel Upload
+                </button>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleUpload(); }}
+                  style={{ padding: '8px 16px', background: 'var(--accent-blue)', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+                >
+                  Confirm Upload
+                </button>
+              </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>

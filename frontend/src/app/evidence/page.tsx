@@ -148,16 +148,6 @@ function EvidenceContent() {
                       {entity.description}
                     </div>
                   )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                    <div className={`confidence-bar ${(entity.confidence || 0) >= 0.7 ? 'confidence-high' : (entity.confidence || 0) >= 0.4 ? 'confidence-mid' : 'confidence-low'}`} style={{ flex: 1, maxWidth: 80 }}>
-                      <div className="confidence-track" style={{ height: 4 }}>
-                        <div className="confidence-fill" style={{ width: `${(entity.confidence || 0) * 100}%`, height: 4 }} />
-                      </div>
-                    </div>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                      {((entity.confidence || 0) * 100).toFixed(0)}%
-                    </span>
-                  </div>
                 </div>
               ))}
             </div>
@@ -165,7 +155,7 @@ function EvidenceContent() {
         </div>
 
         {/* Right Panel: Evidence Details + Page Viewer */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, height: 'calc(100vh - 140px)', overflow: 'hidden', position: 'sticky', top: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, height: 'calc(100vh - 140px)', overflowY: 'auto', position: 'sticky', top: '20px' }}>
           {selectedEntity && evidence ? (
             <>
               {/* Evidence Detail */}
@@ -191,8 +181,8 @@ function EvidenceContent() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 16 }}>
                   <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 'var(--radius-sm)' }}>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Confidence</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: (selectedEntity.confidence || 0) >= 0.7 ? 'var(--status-success)' : 'var(--status-warning)' }}>
-                      {((selectedEntity.confidence || 0) * 100).toFixed(0)}%
+                    <div style={{ fontSize: 16, fontWeight: 700, color: (selectedEntity.confidence || selectedEntity.properties?.confidence || evidence?.confidence || 0) >= 0.7 ? 'var(--status-success)' : 'var(--status-warning)' }}>
+                      {((selectedEntity.confidence || selectedEntity.properties?.confidence || evidence?.confidence || 0) * 100).toFixed(0)}%
                     </div>
                   </div>
                   <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 'var(--radius-sm)' }}>
@@ -201,11 +191,19 @@ function EvidenceContent() {
                   </div>
                   <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 'var(--radius-sm)' }}>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Method</div>
-                    <div style={{ fontSize: 12, fontWeight: 500 }}>{evidence.provenance.extraction_method || 'Table Extraction (LlamaParse)'}</div>
+                    <div style={{ fontSize: 12, fontWeight: 500 }}>{evidence.provenance.extraction_method || 'Information Extraction Pipeline'}</div>
                   </div>
                   <div style={{ background: 'var(--bg-secondary)', padding: 10, borderRadius: 'var(--radius-sm)' }}>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Model</div>
                     <div style={{ fontSize: 12, fontWeight: 500 }}>{evidence.provenance.model_name?.split('/').pop() || 'gpt-4o'}</div>
+                  </div>
+                </div>
+
+                {/* Evidence Text Block */}
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Evidence / Extracted Context</div>
+                  <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 8, fontSize: 13, border: '1px solid var(--border-subtle)', fontStyle: 'italic', color: 'var(--text-primary)', lineHeight: 1.6 }}>
+                    {selectedEntity.properties?.evidence_text || selectedEntity.properties?.context || evidence?.chunk_text || 'No exact evidence extracted.'}
                   </div>
                 </div>
 
@@ -256,7 +254,7 @@ function EvidenceContent() {
 
               {/* Page Image Viewer */}
               {selectedPage !== null && (
-                <div className="card" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <div className="card" style={{ flexShrink: 0, minHeight: 800, display: 'flex', flexDirection: 'column' }}>
                   <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Eye size={14} /> Page {selectedPage + 1}
